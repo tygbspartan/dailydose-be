@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { ResponseUtil } from "../utils/response.util";
 import { NotFoundError, BadRequestError } from "../utils/customError.util";
+import { authenticateAdmin } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -25,6 +26,11 @@ router.get("/not-found", (req: Request, res: Response, next: NextFunction) => {
   } catch (error) {
     next(error);
   }
+});
+
+// Test Admin Priviledged routes
+router.get('/admin-only', authenticateAdmin, (req: Request, res: Response) => {
+  res.json({ message: 'You are an admin!' });
 });
 
 export default router;

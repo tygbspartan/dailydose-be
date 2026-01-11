@@ -1,5 +1,6 @@
 import express, { Application } from "express";
 import cors from "cors";
+import passport from "./config/passport.config";
 import { requestLogger } from "./middleware/logger.middleware";
 import {
   errorHandler,
@@ -20,6 +21,9 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
+
+// Initialize Passport
+app.use(passport.initialize());
 
 // API Routes
 app.use("/api", apiRoutes);

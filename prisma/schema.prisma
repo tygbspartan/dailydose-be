@@ -7,17 +7,261 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User Model
+// ==================== USER & AUTH (Already exists - don't touch) ====================
+
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  firstName    String?  @map("first_name")
-  lastName     String?  @map("last_name")
-  phone        String?
-  role         String   @default("customer")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id           Int     @id @default(autoincrement())
+  email        String  @unique
+  passwordHash String? @map("password_hash")
+  googleId     String? @unique @map("google_id")
+
+  firstName String? @map("first_name")
+  lastName  String? @map("last_name")
+  phone     String?
+
+  role String @default("customer")
+
+  isEmailVerified        Boolean @default(false) @map("is_email_verified")
+  emailVerificationToken String? @unique @map("email_verification_token")
+
+  passwordResetToken  String?   @unique @map("password_reset_token")
+  passwordResetExpiry DateTime? @map("password_reset_expiry")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  cartItems     CartItem[]
+  wishlistItems WishlistItem[]
 
   @@map("users")
+}
+
+// ==================== CATEGORIES (3-LEVEL HIERARCHY) ====================
+
+model Category {
+  id          Int     @id @default(autoincrement())
+  name        String // e.g., "Personal Care", "Skin Care", "Face Masks"
+  slug        String  @unique // e.g., "personal-care", "skin-care", "face-masks"
+  description String?
+
+  // THIS IS HOW 3-LEVEL WORKS:
+  parentId Int? @map("parent_id") // NULL for Level 1, points to parent for Level 2 & 3
+  level    Int  @default(1) // 1 = Main (Personal Care), 2 = Sub (Skin Care), 3 = Group (Face Masks)
+
+  imageUrl     String? @map("image_url")
+  displayOrder Int     @default(0) @map("display_order") // For sorting
+  isActive     Boolean @default(true) @map("is_active")
+
+  // SEO
+  metaTitle       String? @map("meta_title")
+  metaDescription String? @map("meta_description")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations for 3-level hierarchy
+  parent   Category?  @relation("CategoryToCategory", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryToCategory") // Level 1 has Level 2 children, Level 2 has Level 3 children
+
+  products Product[] // Only Level 3 (Product Groups) will have products
+
+  @@map("categories")
+}
+
+// EXAMPLE DATA:
+// Level 1: { id: 1, name: "Personal Care", parentId: null, level: 1 }
+// Level 2: { id: 2, name: "Skin Care", parentId: 1, level: 2 }
+// Level 3: { id: 3, name: "Face Masks", parentId: 2, level: 3 }
+// Your product will have categoryId: 3 (Face Masks)
+
+// ==================== BRANDS ====================
+
+model Brand {
+  id              Int     @id @default(autoincrement())
+  name            String // e.g., "Pax Moly"
+  slug            String  @unique // e.g., "pax-moly"
+  description     String?
+  logoUrl         String? @map("logo_url")
+  countryOfOrigin String? @map("country_of_origin") // e.g., "Korea"
+  isActive        Boolean @default(true) @map("is_active")
+  isFeatured      Boolean @default(false) @map("is_featured")
+
+  // SEO
+  metaTitle       String? @map("meta_title")
+  metaDescription String? @map("meta_description")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  products Product[]
+
+  @@map("brands")
+}
+
+// ==================== PRODUCTS ====================
+
+model Product {
+  id   Int     @id @default(autoincrement())
+  name String // e.g., "Pax Moly KOREA Real Snail Facial Sheet Mask"
+  slug String  @unique // e.g., "pax-moly-korea-real-snail-facial-sheet-mask"
+  sku  String? @unique
+
+  // Categorization
+  brandId    Int? @map("brand_id")
+  categoryId Int? @map("category_id") // Points to Level 3 category (Face Masks)
+
+  // Pricing
+  price         Decimal  @db.Decimal(10, 2) // Rs 66 (current selling price)
+  originalPrice Decimal? @map("original_price") @db.Decimal(10, 2) // Rs 100 (for discount display)
+  costPrice     Decimal? @map("cost_price") @db.Decimal(10, 2) // Your cost (hidden)
+
+  // Description
+  shortDescription String? @map("short_description") @db.Text // Quick overview
+  longDescription  String? @map("long_description") @db.Text // Full description
+
+  // Product Details
+  volume          String? // "1 sheet"
+  weight          Decimal? @db.Decimal(10, 2) // For shipping later
+  countryOfOrigin String?  @map("country_of_origin") // "Korea"
+
+  // Marketing Content (Your product fields)
+  effectiveFor   String? @map("effective_for") @db.Text // Store as JSON or newline-separated
+  features       String? @db.Text // Store as JSON or newline-separated
+  certifications String? @db.Text // Store as JSON or newline-separated
+
+  // Usage Information
+  howToUse    String? @map("how_to_use") @db.Text
+  ingredients String? @db.Text
+  cautions    String? @db.Text
+
+  // Stock Management
+  stockQuantity     Int @default(0) @map("stock_quantity")
+  lowStockThreshold Int @default(5) @map("low_stock_threshold")
+
+  // SEO
+  metaTitle       String? @map("meta_title")
+  metaDescription String? @map("meta_description")
+
+  // Status & Features
+  isActive   Boolean @default(true) @map("is_active")
+  isFeatured Boolean @default(false) @map("is_featured")
+
+  // Badges (e.g., ["New", "Best Seller"])
+  badges String? @db.Text // Store as JSON array
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  brand          Brand?                 @relation(fields: [brandId], references: [id])
+  category       Category?              @relation(fields: [categoryId], references: [id])
+  images         ProductImage[]
+  specifications ProductSpecification[]
+  discounts      ProductDiscount[]
+  cartItems      CartItem[]
+  wishlistItems  WishlistItem[]
+
+  @@map("products")
+}
+
+// ==================== PRODUCT IMAGES ====================
+
+model ProductImage {
+  id           Int     @id @default(autoincrement())
+  productId    Int     @map("product_id")
+  imageUrl     String  @map("image_url") // Imgur URL
+  altText      String? @map("alt_text")
+  isPrimary    Boolean @default(false) @map("is_primary") // Main product image
+  displayOrder Int     @default(0) @map("display_order") // For sorting
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_images")
+}
+
+// ==================== FLEXIBLE SPECIFICATIONS ====================
+
+model ProductSpecification {
+  id        Int    @id @default(autoincrement())
+  productId Int    @map("product_id")
+  key       String // e.g., "Skin Type", "Volume", "Category"
+  value     String // e.g., "Normal - Dry", "1 sheet", "Facial mask pack"
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_specifications")
+}
+
+// EXAMPLE:
+// { key: "Volume", value: "1 sheet" }
+// { key: "Country of Origin", value: "Korea" }
+// { key: "Skin Type", value: "Normal - Dry" }
+
+// ==================== PROMOTIONAL DISCOUNTS ====================
+
+model Discount {
+  id                Int      @id @default(autoincrement())
+  name              String // e.g., "Summer Sale 2025"
+  code              String?  @unique // Optional promo code like "SUMMER20"
+  type              String // "percentage" or "fixed"
+  value             Decimal  @db.Decimal(10, 2) // 20 (for 20%) or 100 (for Rs 100 off)
+  minPurchaseAmount Decimal? @map("min_purchase_amount") @db.Decimal(10, 2)
+  maxDiscountAmount Decimal? @map("max_discount_amount") @db.Decimal(10, 2)
+  startDate         DateTime @map("start_date")
+  endDate           DateTime @map("end_date")
+  isActive          Boolean  @default(true) @map("is_active")
+  usageLimit        Int?     @map("usage_limit")
+  usedCount         Int      @default(0) @map("used_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  products ProductDiscount[]
+
+  @@map("discounts")
+}
+
+// Link products to promotional discounts
+model ProductDiscount {
+  id         Int @id @default(autoincrement())
+  productId  Int @map("product_id")
+  discountId Int @map("discount_id")
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  discount Discount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, discountId])
+  @@map("product_discounts")
+}
+
+// ==================== CART ====================
+
+model CartItem {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  productId Int      @map("product_id")
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("cart_items")
+}
+
+// ==================== WISHLIST ====================
+
+model WishlistItem {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  productId Int      @map("product_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("wishlist_items")
 }
