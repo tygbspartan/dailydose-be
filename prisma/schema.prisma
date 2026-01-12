@@ -30,9 +30,11 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  cartItems     CartItem[]
-  wishlistItems WishlistItem[]
-  orders        Order[]
+  cartItems          CartItem[]
+  wishlistItems      WishlistItem[]
+  orders             Order[]
+  reviews            Review[]
+  reviewHelpfulVotes ReviewHelpful[]
 
   @@map("users")
 }
@@ -162,6 +164,7 @@ model Product {
   cartItems      CartItem[]
   wishlistItems  WishlistItem[]
   orderItems     OrderItem[]
+  reviews        Review[]
 
   @@map("products")
 }
@@ -219,6 +222,7 @@ model Discount {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   products ProductDiscount[]
+  orders   Order[]
 
   @@map("discounts")
 }
@@ -280,7 +284,7 @@ model Order {
   subtotal     Decimal @db.Decimal(10, 2)
   shippingCost Decimal @default(0) @map("shipping_cost") @db.Decimal(10, 2)
   tax          Decimal @default(0) @db.Decimal(10, 2)
-  discount     Decimal @default(0) @db.Decimal(10, 2)
+  discount     Decimal @default(0) @db.Decimal(10, 2) // ← Amount of discount
   total        Decimal @db.Decimal(10, 2)
 
   // Shipping Info (Collected at checkout)
@@ -297,7 +301,11 @@ model Order {
   // Payment
   paymentMethod     String  @map("payment_method") // cod, esewa, khalti, bank_transfer
   paymentStatus     String  @default("pending") @map("payment_status") // pending, paid, failed
-  transactionNumber String? @map("transaction_number") // ✅ NEW: Required for online payments, null for COD
+  transactionNumber String? @map("transaction_number")
+
+  // Discount
+  discountId   Int?    @map("discount_id") // Foreign key to Discount
+  discountCode String? @map("discount_code") // Store code used (e.g., "SUMMER20")
 
   // Notes
   customerNote String? @map("customer_note")
@@ -308,8 +316,10 @@ model Order {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  user  User        @relation(fields: [userId], references: [id])
-  items OrderItem[]
+  user            User        @relation(fields: [userId], references: [id])
+  items           OrderItem[]
+  appliedDiscount Discount?   @relation(fields: [discountId], references: [id], onDelete: SetNull) //
+  reviews         Review[]
 
   @@map("orders")
 }
@@ -336,4 +346,55 @@ model OrderItem {
   product Product @relation(fields: [productId], references: [id])
 
   @@map("order_items")
+}
+
+// ==================== REVIEWS & RATINGS ====================
+
+model Review {
+  id        Int  @id @default(autoincrement())
+  productId Int  @map("product_id")
+  userId    Int  @map("user_id")
+  orderId   Int? @map("order_id") // NULL if not from order (for verification)
+
+  // Rating & Content
+  rating  Int // 1-5 stars
+  title   String? // Optional review title
+  comment String  @db.Text
+
+  // Images (optional - customers can upload review photos)
+  images String? @db.Text // JSON array of image URLs
+
+  // Moderation
+  isVerifiedPurchase Boolean @default(false) @map("is_verified_purchase")
+  isApproved         Boolean @default(false) @map("is_approved") // Admin moderation
+  adminNote          String? @map("admin_note")
+
+  // Helpful votes
+  helpfulCount Int @default(0) @map("helpful_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  product      Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order        Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  helpfulVotes ReviewHelpful[]
+
+  @@unique([productId, userId]) // One review per user per product
+  @@map("reviews")
+}
+
+model ReviewHelpful {
+  id       Int @id @default(autoincrement())
+  reviewId Int @map("review_id")
+  userId   Int @map("user_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, userId]) // One vote per user per review
+  @@map("review_helpful")
 }
