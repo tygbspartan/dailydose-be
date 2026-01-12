@@ -30,8 +30,11 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  cartItems     CartItem[]
-  wishlistItems WishlistItem[]
+  cartItems          CartItem[]
+  wishlistItems      WishlistItem[]
+  orders             Order[]
+  reviews            Review[]
+  reviewHelpfulVotes ReviewHelpful[]
 
   @@map("users")
 }
@@ -160,6 +163,8 @@ model Product {
   discounts      ProductDiscount[]
   cartItems      CartItem[]
   wishlistItems  WishlistItem[]
+  orderItems     OrderItem[]
+  reviews        Review[]
 
   @@map("products")
 }
@@ -217,6 +222,7 @@ model Discount {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   products ProductDiscount[]
+  orders   Order[]
 
   @@map("discounts")
 }
@@ -264,4 +270,131 @@ model WishlistItem {
 
   @@unique([userId, productId])
   @@map("wishlist_items")
+}
+
+model Order {
+  id          Int    @id @default(autoincrement())
+  orderNumber String @unique @map("order_number") // e.g., "ORD-2026-001"
+  userId      Int    @map("user_id")
+
+  // Order Status
+  status String @default("pending") // pending, confirmed, processing, shipped, delivered, cancelled
+
+  // Pricing
+  subtotal     Decimal @db.Decimal(10, 2)
+  shippingCost Decimal @default(0) @map("shipping_cost") @db.Decimal(10, 2)
+  tax          Decimal @default(0) @db.Decimal(10, 2)
+  discount     Decimal @default(0) @db.Decimal(10, 2) // ← Amount of discount
+  total        Decimal @db.Decimal(10, 2)
+
+  // Shipping Info (Collected at checkout)
+  shippingFullName     String  @map("shipping_full_name")
+  shippingPhone        String  @map("shipping_phone")
+  shippingAddressLine1 String  @map("shipping_address_line1")
+  shippingAddressLine2 String? @map("shipping_address_line2")
+  shippingLandmark     String? @map("shipping_landmark")
+  shippingCity         String  @map("shipping_city")
+  shippingProvince     String? @map("shipping_province")
+  shippingPostalCode   String  @map("shipping_postal_code")
+  shippingCountry      String  @default("Nepal") @map("shipping_country")
+
+  // Payment
+  paymentMethod     String  @map("payment_method") // cod, esewa, khalti, bank_transfer
+  paymentStatus     String  @default("pending") @map("payment_status") // pending, paid, failed
+  transactionNumber String? @map("transaction_number")
+
+  // Discount
+  discountId   Int?    @map("discount_id") // Foreign key to Discount
+  discountCode String? @map("discount_code") // Store code used (e.g., "SUMMER20")
+
+  // Notes
+  customerNote String? @map("customer_note")
+  adminNote    String? @map("admin_note")
+
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user            User        @relation(fields: [userId], references: [id])
+  items           OrderItem[]
+  appliedDiscount Discount?   @relation(fields: [discountId], references: [id], onDelete: SetNull) //
+  reviews         Review[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        Int @id @default(autoincrement())
+  orderId   Int @map("order_id")
+  productId Int @map("product_id")
+
+  // Product Snapshot (at time of order)
+  productName  String  @map("product_name")
+  productSku   String? @map("product_sku")
+  productImage String? @map("product_image") // Primary image URL
+
+  // Pricing
+  price    Decimal @db.Decimal(10, 2) // Price at time of order
+  quantity Int
+  subtotal Decimal @db.Decimal(10, 2) // price * quantity
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+// ==================== REVIEWS & RATINGS ====================
+
+model Review {
+  id        Int  @id @default(autoincrement())
+  productId Int  @map("product_id")
+  userId    Int  @map("user_id")
+  orderId   Int? @map("order_id") // NULL if not from order (for verification)
+
+  // Rating & Content
+  rating  Int // 1-5 stars
+  title   String? // Optional review title
+  comment String  @db.Text
+
+  // Images (optional - customers can upload review photos)
+  images String? @db.Text // JSON array of image URLs
+
+  // Moderation
+  isVerifiedPurchase Boolean @default(false) @map("is_verified_purchase")
+  isApproved         Boolean @default(false) @map("is_approved") // Admin moderation
+  adminNote          String? @map("admin_note")
+
+  // Helpful votes
+  helpfulCount Int @default(0) @map("helpful_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  product      Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order        Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  helpfulVotes ReviewHelpful[]
+
+  @@unique([productId, userId]) // One review per user per product
+  @@map("reviews")
+}
+
+model ReviewHelpful {
+  id       Int @id @default(autoincrement())
+  reviewId Int @map("review_id")
+  userId   Int @map("user_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, userId]) // One vote per user per review
+  @@map("review_helpful")
 }
