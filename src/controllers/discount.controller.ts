@@ -35,7 +35,7 @@ export class DiscountController {
       // Validation
       if (!name || !code || !type || !value || !startDate || !endDate) {
         throw new BadRequestError(
-          "Name, code, type, value, start date, and end date are required"
+          "Name, code, type, value, start date, and end date are required",
         );
       }
 
@@ -82,7 +82,7 @@ export class DiscountController {
           const foundIds = products.map((p) => p.id);
           const missingIds = productIds.filter((id) => !foundIds.includes(id));
           throw new BadRequestError(
-            `Products with IDs ${missingIds.join(", ")} not found`
+            `Products with IDs ${missingIds.join(", ")} not found`,
           );
         }
       }
@@ -111,8 +111,8 @@ export class DiscountController {
                 productId,
                 discountId: discount.id,
               },
-            })
-          )
+            }),
+          ),
         );
       }
 
@@ -137,7 +137,7 @@ export class DiscountController {
         res,
         discountWithProducts,
         "Discount created successfully",
-        201
+        201,
       );
     } catch (error) {
       next(error);
@@ -147,7 +147,7 @@ export class DiscountController {
   // Get all discounts (Admin)
   static async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const { isActive, type } = req.query;
+      const { isActive, type, search } = req.query;
 
       // Build filter
       const where: any = {};
@@ -158,6 +158,18 @@ export class DiscountController {
 
       if (type) {
         where.type = type;
+      }
+
+      if (search) {
+        where.OR = [
+          { name: { contains: search as string, mode: "insensitive" } },
+          {
+            code: {
+              contains: search as string,
+              mode: "insensitive",
+            },
+          },
+        ];
       }
 
       const discounts = await prisma.discount.findMany({
@@ -185,7 +197,7 @@ export class DiscountController {
       return ResponseUtil.success(
         res,
         discounts,
-        "Discounts retrieved successfully"
+        "Discounts retrieved successfully",
       );
     } catch (error) {
       next(error);
@@ -226,7 +238,7 @@ export class DiscountController {
       return ResponseUtil.success(
         res,
         discount,
-        "Discount retrieved successfully"
+        "Discount retrieved successfully",
       );
     } catch (error) {
       next(error);
@@ -310,7 +322,7 @@ export class DiscountController {
       return ResponseUtil.success(
         res,
         discount,
-        "Discount updated successfully"
+        "Discount updated successfully",
       );
     } catch (error) {
       next(error);
@@ -370,7 +382,7 @@ export class DiscountController {
             valid: false,
             message: "Invalid discount code",
           },
-          "Discount code validation failed"
+          "Discount code validation failed",
         );
       }
 
@@ -382,7 +394,7 @@ export class DiscountController {
             valid: false,
             message: "This discount code is no longer active",
           },
-          "Discount code validation failed"
+          "Discount code validation failed",
         );
       }
 
@@ -395,7 +407,7 @@ export class DiscountController {
             valid: false,
             message: "This discount code has expired",
           },
-          "Discount code validation failed"
+          "Discount code validation failed",
         );
       }
 
@@ -407,7 +419,7 @@ export class DiscountController {
             valid: false,
             message: "This discount code has reached its usage limit",
           },
-          "Discount code validation failed"
+          "Discount code validation failed",
         );
       }
 
@@ -422,7 +434,7 @@ export class DiscountController {
             valid: false,
             message: `Minimum purchase amount of Rs ${discount.minPurchaseAmount} required`,
           },
-          "Discount code validation failed"
+          "Discount code validation failed",
         );
       }
 
@@ -462,7 +474,7 @@ export class DiscountController {
             discountAmount: Math.round(discountAmount * 100) / 100, // Round to 2 decimals
           },
         },
-        "Discount code is valid"
+        "Discount code is valid",
       );
     } catch (error) {
       next(error);

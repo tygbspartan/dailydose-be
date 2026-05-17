@@ -1,6 +1,12 @@
 import nodemailer from "nodemailer";
 import { config } from "../config/env.config";
 
+interface EmailOptions {
+  to: string;
+  subject: string;
+  html: string;
+}
+
 export class EmailService {
   private static transporter = nodemailer.createTransport({
     host: config.emailHost,
@@ -11,6 +17,25 @@ export class EmailService {
       pass: config.emailPassword,
     },
   });
+
+  // Add this function with your other email functions
+  static async sendEmail(options: EmailOptions): Promise<void> {
+    try {
+      await this.transporter.verify();
+      const mailOptions = {
+        from: `"Daily Dose" <${config.emailFrom}>`,
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
+      };
+
+      await this.transporter.sendMail(mailOptions);
+      console.log(`Email sent successfully to ${options.to}`);
+    } catch (error) {
+      console.error("Error sending email:", error);
+      throw new Error("Failed to send email");
+    }
+  }
 
   // Test email configuration
   static async testConnection(): Promise<boolean> {

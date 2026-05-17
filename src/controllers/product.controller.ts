@@ -15,87 +15,69 @@ import {
   UpdateProductRequest,
 } from "../types/product.types";
 
+// Helper function to parse JSON fields
+const parseProductArrays = (product: any) => {
+  return {
+    ...product,
+    // effectiveFor: product.effectiveFor
+    //   ? JSON.parse(product.effectiveFor)
+    //   : null,
+    // // features: product.features ? JSON.parse(product.features) : null,
+    // certifications: product.certifications
+    //   ? JSON.parse(product.certifications)
+    //   : null,
+    // howToUse: product.howToUse ? JSON.parse(product.howToUse) : null,
+    // ingredients: product.ingredients ? JSON.parse(product.ingredients) : null,
+    // cautions: product.cautions ? JSON.parse(product.cautions) : null,
+  };
+};
+
 export class ProductController {
-  // Create product (Admin only)
+  // Create product (Admin)
   static async create(req: Request, res: Response, next: NextFunction) {
     try {
       const {
         name,
-        slug,
-        sku,
-        brandId,
-        categoryId,
+        shortDescription,
+        longDescription,
         price,
         originalPrice,
         costPrice,
-        shortDescription,
-        longDescription,
-        volume,
-        weight,
-        countryOfOrigin,
+        stockQuantity,
+        lowStockThreshold,
+        sku,
+        brandId,
+        categoryId,
+        isActive,
+        isFeatured,
         effectiveFor,
         features,
         certifications,
         howToUse,
         ingredients,
         cautions,
-        stockQuantity,
-        lowStockThreshold,
+        images,
+        specifications,
         metaTitle,
         metaDescription,
-        isFeatured,
-        badges,
-        images, // ✅ NEW: Accept images
-        specifications, // ✅ NEW: Accept specifications
-      }: CreateProductRequest & {
-        images?: ProductImageRequest[];
-        specifications?: ProductSpecificationRequest[];
-      } = req.body;
+      }: CreateProductRequest = req.body;
 
       // Validation
-      if (!name) {
-        throw new BadRequestError("Product name is required");
-      }
-
-      if (!price || price <= 0) {
-        throw new BadRequestError("Valid price is required");
-      }
-
-      // Validate brand exists if provided
-      if (brandId) {
-        const brand = await prisma.brand.findUnique({
-          where: { id: brandId },
-        });
-        if (!brand) {
-          throw new NotFoundError("Brand not found");
-        }
-      }
-
-      // Validate category exists if provided
-      if (categoryId) {
-        const category = await prisma.category.findUnique({
-          where: { id: categoryId },
-        });
-        if (!category) {
-          throw new NotFoundError("Category not found");
-        }
-      }
-
-      // Generate slug if not provided
-      let productSlug = slug || SlugUtil.generateSlug(name);
-
-      // Check if slug already exists
-      const existingSlug = await prisma.product.findUnique({
-        where: { slug: productSlug },
-      });
-
-      if (existingSlug) {
-        throw new ConflictError(
-          `Product with slug "${productSlug}" already exists`
+      if (!name || !price || stockQuantity === undefined) {
+        throw new BadRequestError(
+          "Name, price, and stock quantity are required",
         );
       }
 
-      // Check if SKU already exists
+      if (price <= 0) {
+        throw new BadRequestError("Price must be greater than 0");
+      }
+
+      if (stockQuantity < 0) {
+        throw new BadRequestError("Stock quantity cannot be negative");
+      }
+
+      // Check if SKU already exists (if provided)
       if (sku) {
         const existingSku = await prisma.product.findUnique({
           where: { sku },
@@ -106,111 +88,460 @@ export class ProductController {
         }
       }
 
-      // Convert arrays to JSON strings
-      const effectiveForJson = JsonUtil.arrayToJson(effectiveFor);
-      const featuresJson = JsonUtil.arrayToJson(features);
-      const certificationsJson = JsonUtil.arrayToJson(certifications);
-      const badgesJson = JsonUtil.arrayToJson(badges);
+      // Generate slug from name
+      const slug = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
 
-      // Create product with images and specifications in a transaction
-      const product = await prisma.$transaction(async (prisma) => {
-        // 1. Create product
-        const newProduct = await prisma.product.create({
-          data: {
-            name,
-            slug: productSlug,
-            sku,
-            brandId,
-            categoryId,
-            price,
-            originalPrice,
-            costPrice,
-            shortDescription,
-            longDescription,
-            volume,
-            weight,
-            countryOfOrigin,
-            effectiveFor: effectiveForJson,
-            features: featuresJson,
-            certifications: certificationsJson,
-            howToUse,
-            ingredients,
-            cautions,
-            stockQuantity: stockQuantity || 0,
-            lowStockThreshold: lowStockThreshold || 5,
-            metaTitle,
-            metaDescription,
-            isFeatured: isFeatured || false,
-            badges: badgesJson,
-          },
+      // Check if slug already exists
+      const existingSlug = await prisma.product.findUnique({
+        where: { slug },
+      });
+
+      if (existingSlug) {
+        // Append random number to make it unique
+        const uniqueSlug = `${slug}-${Date.now()}`;
+
+        // Create product with images and specifications in a transaction
+        const product = await prisma.$transaction(async (tx) => {
+          // 1. Create product
+          const newProduct = await tx.product.create({
+            data: {
+              name,
+              slug: uniqueSlug,
+              shortDescription,
+              longDescription,
+              price,
+              originalPrice,
+              costPrice,
+              stockQuantity,
+              lowStockThreshold: lowStockThreshold || 10,
+              sku,
+              brandId,
+              categoryId,
+              metaTitle,
+              metaDescription,
+              isActive: isActive ?? true,
+              isFeatured: isFeatured ?? false,
+              // Convert arrays to JSON strings
+              effectiveFor: effectiveFor ? JSON.stringify(effectiveFor) : null,
+              features: features ? JSON.stringify(features) : null,
+              certifications: certifications
+                ? JSON.stringify(certifications)
+                : null,
+              howToUse: howToUse ? JSON.stringify(howToUse) : null,
+              ingredients: ingredients ? JSON.stringify(ingredients) : null,
+              cautions: cautions ? JSON.stringify(cautions) : null,
+            },
+          });
+
+          // 2. Create product images
+          if (images && images.length > 0) {
+            await Promise.all(
+              images.map((image) =>
+                tx.productImage.create({
+                  data: {
+                    productId: newProduct.id,
+                    imageUrl: image.imageUrl,
+                    altText: image.altText || newProduct.name,
+                    isPrimary: image.isPrimary,
+                    displayOrder: image.displayOrder,
+                  },
+                }),
+              ),
+            );
+          }
+
+          // 3. Create specifications
+          if (specifications && specifications.length > 0) {
+            await Promise.all(
+              specifications.map((spec) =>
+                tx.productSpecification.create({
+                  data: {
+                    productId: newProduct.id,
+                    key: spec.key,
+                    value: spec.value,
+                  },
+                }),
+              ),
+            );
+          }
+
+          return newProduct;
         });
 
-        // 2. Create images if provided
-        if (images && images.length > 0) {
-          await Promise.all(
-            images.map((image, index) =>
-              prisma.productImage.create({
-                data: {
-                  productId: newProduct.id,
-                  imageUrl: image.imageUrl,
-                  altText: image.altText,
-                  isPrimary: image.isPrimary || false,
-                  displayOrder: image.displayOrder ?? index + 1,
-                },
-              })
-            )
-          );
-        }
-
-        // 3. Create specifications if provided
-        if (specifications && specifications.length > 0) {
-          await Promise.all(
-            specifications.map((spec) =>
-              prisma.productSpecification.create({
-                data: {
-                  productId: newProduct.id,
-                  key: spec.key,
-                  value: spec.value,
-                },
-              })
-            )
-          );
-        }
-
-        // 4. Return product with relations
-        return await prisma.product.findUnique({
-          where: { id: newProduct.id },
+        // Fetch created product with relations
+        const productWithRelations = await prisma.product.findUnique({
+          where: { id: product.id },
           include: {
             brand: true,
-            category: {
-              include: {
-                parent: {
-                  include: {
-                    parent: true,
-                  },
-                },
-              },
-            },
+            category: true,
             images: {
               orderBy: { displayOrder: "asc" },
             },
             specifications: true,
           },
         });
+
+        return ResponseUtil.success(
+          res,
+          productWithRelations,
+          "Product created successfully",
+          201,
+        );
+      } else {
+        // Create product with images and specifications in a transaction
+        const product = await prisma.$transaction(async (tx) => {
+          // 1. Create product
+          const newProduct = await tx.product.create({
+            data: {
+              name,
+              slug,
+              shortDescription,
+              longDescription,
+              price,
+              originalPrice,
+              costPrice,
+              stockQuantity,
+              lowStockThreshold: lowStockThreshold || 10,
+              sku,
+              brandId,
+              categoryId,
+              isActive: isActive ?? true,
+              isFeatured: isFeatured ?? false,
+              metaDescription,
+              metaTitle,
+              // Convert arrays to JSON strings
+              effectiveFor: effectiveFor ? JSON.stringify(effectiveFor) : null,
+              features: features ? JSON.stringify(features) : null,
+              certifications: certifications
+                ? JSON.stringify(certifications)
+                : null,
+              howToUse: howToUse ? JSON.stringify(howToUse) : null,
+              ingredients: ingredients ? JSON.stringify(ingredients) : null,
+              cautions: cautions ? JSON.stringify(cautions) : null,
+            },
+          });
+
+          // 2. Create product images
+          if (images && images.length > 0) {
+            await Promise.all(
+              images.map((image) =>
+                tx.productImage.create({
+                  data: {
+                    productId: newProduct.id,
+                    imageUrl: image.imageUrl,
+                    altText: image.altText || newProduct.name,
+                    isPrimary: image.isPrimary,
+                    displayOrder: image.displayOrder,
+                  },
+                }),
+              ),
+            );
+          }
+
+          // 3. Create specifications
+          if (specifications && specifications.length > 0) {
+            await Promise.all(
+              specifications.map((spec) =>
+                tx.productSpecification.create({
+                  data: {
+                    productId: newProduct.id,
+                    key: spec.key,
+                    value: spec.value,
+                  },
+                }),
+              ),
+            );
+          }
+
+          return newProduct;
+        });
+
+        // Fetch created product with relations
+        const productWithRelations = await prisma.product.findUnique({
+          where: { id: product.id },
+          include: {
+            brand: true,
+            category: true,
+            images: {
+              orderBy: { displayOrder: "asc" },
+            },
+            specifications: true,
+          },
+        });
+
+        return ResponseUtil.success(
+          res,
+          parseProductArrays(productWithRelations),
+          "Product created successfully",
+          201,
+        );
+      }
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Update product (Admin)
+  static async update(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const updateData: UpdateProductRequest = req.body;
+
+      const productId = parseInt(id);
+
+      // Check if product exists
+      const existingProduct = await prisma.product.findUnique({
+        where: { id: productId },
+        include: {
+          images: true,
+          specifications: true,
+        },
       });
 
-      // Transform response
-      const response = ProductController.transformProductResponse(product);
+      if (!existingProduct) {
+        throw new NotFoundError("Product not found");
+      }
+
+      // Extract fields from updateData
+      const {
+        name,
+        shortDescription,
+        longDescription,
+        price,
+        originalPrice,
+        costPrice,
+        stockQuantity,
+        lowStockThreshold,
+        sku,
+        brandId,
+        categoryId,
+        isActive,
+        isFeatured,
+        effectiveFor,
+        features,
+        certifications,
+        howToUse,
+        ingredients,
+        cautions,
+        images,
+        specifications,
+        metaTitle,
+        metaDescription,
+      } = updateData;
+
+      // Check if SKU is being changed and if it's already in use
+      if (sku && sku !== existingProduct.sku) {
+        const existingSku = await prisma.product.findUnique({
+          where: { sku },
+        });
+
+        if (existingSku) {
+          throw new ConflictError(`Product with SKU "${sku}" already exists`);
+        }
+      }
+
+      // Generate new slug if name is being changed
+      let slug = existingProduct.slug;
+      if (name && name !== existingProduct.name) {
+        slug = name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/(^-|-$)/g, "");
+
+        // Check if new slug already exists
+        const existingSlug = await prisma.product.findFirst({
+          where: {
+            slug,
+            id: { not: productId },
+          },
+        });
+
+        if (existingSlug) {
+          slug = `${slug}-${Date.now()}`;
+        }
+      }
+
+      // Update product with images and specifications in a transaction
+      const product = await prisma.$transaction(async (tx) => {
+        // 1. Update product
+        const updatedProduct = await tx.product.update({
+          where: { id: productId },
+          data: {
+            name,
+            slug,
+            shortDescription,
+            longDescription,
+            price,
+            originalPrice,
+            costPrice,
+            stockQuantity,
+            lowStockThreshold,
+            sku,
+            brandId,
+            categoryId,
+            isActive,
+            isFeatured,
+            metaTitle,
+            metaDescription,
+            // Convert arrays to JSON strings
+            effectiveFor:
+              effectiveFor !== undefined
+                ? effectiveFor
+                  ? JSON.stringify(effectiveFor)
+                  : null
+                : undefined,
+            features:
+              features !== undefined
+                ? features
+                  ? JSON.stringify(features)
+                  : null
+                : undefined,
+            certifications:
+              certifications !== undefined
+                ? certifications
+                  ? JSON.stringify(certifications)
+                  : null
+                : undefined,
+            howToUse:
+              howToUse !== undefined
+                ? howToUse
+                  ? JSON.stringify(howToUse)
+                  : null
+                : undefined,
+            ingredients:
+              ingredients !== undefined
+                ? ingredients
+                  ? JSON.stringify(ingredients)
+                  : null
+                : undefined,
+            cautions:
+              cautions !== undefined
+                ? cautions
+                  ? JSON.stringify(cautions)
+                  : null
+                : undefined,
+          },
+        });
+
+        // 2. Update images if provided
+        if (images !== undefined) {
+          // Delete existing images
+          await tx.productImage.deleteMany({
+            where: { productId },
+          });
+
+          // Create new images
+          if (images && images.length > 0) {
+            await Promise.all(
+              images.map((image) =>
+                tx.productImage.create({
+                  data: {
+                    productId,
+                    imageUrl: image.imageUrl,
+                    altText: image.altText || updatedProduct.name,
+                    isPrimary: image.isPrimary,
+                    displayOrder: image.displayOrder,
+                  },
+                }),
+              ),
+            );
+          }
+        }
+
+        // 3. Update specifications if provided
+        if (specifications !== undefined) {
+          // Delete existing specifications
+          await tx.productSpecification.deleteMany({
+            where: { productId },
+          });
+
+          // Create new specifications
+          if (specifications && specifications.length > 0) {
+            await Promise.all(
+              specifications.map((spec) =>
+                tx.productSpecification.create({
+                  data: {
+                    productId,
+                    key: spec.key,
+                    value: spec.value,
+                  },
+                }),
+              ),
+            );
+          }
+        }
+
+        return updatedProduct;
+      });
+
+      // Fetch updated product with relations
+      const productWithRelations = await prisma.product.findUnique({
+        where: { id: product.id },
+        include: {
+          brand: true,
+          category: true,
+          images: {
+            orderBy: { displayOrder: "asc" },
+          },
+          specifications: true,
+        },
+      });
 
       return ResponseUtil.success(
         res,
-        response,
-        "Product created successfully",
-        201
+        parseProductArrays(productWithRelations),
+        "Product updated successfully",
       );
     } catch (error) {
       next(error);
     }
+  }
+
+  // Helper function to get all category IDs including children
+  private static async getCategoryIdsWithChildren(
+    categoryId: number,
+  ): Promise<number[]> {
+    const category = await prisma.category.findUnique({
+      where: { id: categoryId },
+    });
+
+    if (!category) return [];
+
+    const categoryIds: number[] = [categoryId];
+
+    if (category.level === 1) {
+      // Get all level 2 children
+      const level2Categories = await prisma.category.findMany({
+        where: { parentId: categoryId, level: 2 },
+        select: { id: true },
+      });
+
+      const level2Ids = level2Categories.map((cat) => cat.id);
+      categoryIds.push(...level2Ids);
+
+      // Get all level 3 children
+      if (level2Ids.length > 0) {
+        const level3Categories = await prisma.category.findMany({
+          where: { parentId: { in: level2Ids }, level: 3 },
+          select: { id: true },
+        });
+
+        categoryIds.push(...level3Categories.map((cat) => cat.id));
+      }
+    } else if (category.level === 2) {
+      // Get all level 3 children
+      const level3Categories = await prisma.category.findMany({
+        where: { parentId: categoryId, level: 3 },
+        select: { id: true },
+      });
+
+      categoryIds.push(...level3Categories.map((cat) => cat.id));
+    }
+
+    return categoryIds;
   }
 
   // Get all products with filters (Public)
@@ -221,7 +552,9 @@ export class ProductController {
         limit = 12,
         search,
         categoryId,
+        categorySlug,
         brandId,
+        brandSlug,
         minPrice,
         maxPrice,
         inStock,
@@ -236,7 +569,7 @@ export class ProductController {
 
       // Build where clause
       const where: any = {
-        isActive: true,
+        // isActive: true,
       };
 
       if (search) {
@@ -251,12 +584,44 @@ export class ProductController {
         ];
       }
 
-      if (categoryId) {
-        where.categoryId = parseInt(categoryId as string);
+      if (categoryId || categorySlug) {
+        let targetCategoryId: number | null = null;
+
+        if (categorySlug) {
+          const category = await prisma.category.findUnique({
+            where: { slug: categorySlug as string },
+          });
+          targetCategoryId = category?.id || null;
+        } else {
+          targetCategoryId = parseInt(categoryId as string);
+        }
+
+        if (targetCategoryId) {
+          const categoryIds =
+            await ProductController.getCategoryIdsWithChildren(
+              targetCategoryId,
+            );
+
+          if (categoryIds.length > 0) {
+            where.categoryId =
+              categoryIds.length === 1 ? categoryIds[0] : { in: categoryIds };
+          }
+        }
       }
 
-      if (brandId) {
-        where.brandId = parseInt(brandId as string);
+      // Handle brand filtering (by ID or slug)
+      if (brandId || brandSlug) {
+        if (brandSlug) {
+          const brand = await prisma.brand.findUnique({
+            where: { slug: brandSlug as string },
+            select: { id: true },
+          });
+          if (brand) {
+            where.brandId = brand.id;
+          }
+        } else {
+          where.brandId = parseInt(brandId as string);
+        }
       }
 
       if (minPrice || maxPrice) {
@@ -298,13 +663,16 @@ export class ProductController {
 
       // Transform products
       const transformedProducts = products.map(
-        (product) => ProductController.transformProductResponse(product, false) // false = don't include costPrice
+        (product) => ProductController.transformProductResponse(product, false), // false = don't include costPrice
       );
+
+      // Parse JSON arrays for each product
+      const parsedProducts = transformedProducts.map(parseProductArrays);
 
       return ResponseUtil.success(
         res,
         {
-          data: transformedProducts,
+          data: parsedProducts,
           pagination: {
             page: pageNum,
             limit: limitNum,
@@ -312,12 +680,67 @@ export class ProductController {
             totalPages: Math.ceil(total / limitNum),
           },
         },
-        "Products retrieved successfully"
+        "Products retrieved successfully",
       );
     } catch (error) {
       next(error);
     }
   }
+
+  // Get products with discounts (originalPrice > price)
+  static getDiscountedProducts = async (req: Request, res: Response) => {
+    try {
+      const { limit = 10 } = req.query;
+
+      const products = await prisma.product.findMany({
+        where: {
+          isActive: true,
+          AND: [
+            { originalPrice: { not: null } },
+            {
+              originalPrice: {
+                gt: prisma.product.fields.price,
+              },
+            },
+          ],
+        },
+        include: {
+          brand: true,
+          category: true,
+          images: {
+            orderBy: {
+              displayOrder: "asc",
+            },
+          },
+        },
+        take: parseInt(limit as string),
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+
+      // Transform products
+      const transformedProducts = products.map(
+        (product) => ProductController.transformProductResponse(product, false), // false = don't include costPrice
+      );
+
+      res.status(200).json({
+        status: "success",
+        data: { data: transformedProducts },
+        pagination: {
+          total: transformedProducts.length,
+          page: 1,
+          limit: parseInt(limit as string),
+        },
+      });
+    } catch (error) {
+      console.error("Get discounted products error:", error);
+      res.status(500).json({
+        status: "error",
+        message: "Failed to fetch discounted products",
+      });
+    }
+  };
 
   // Get single product by slug (Public)
   static async getBySlug(req: Request, res: Response, next: NextFunction) {
@@ -355,13 +778,13 @@ export class ProductController {
       // Transform response (hide costPrice from public)
       const response = ProductController.transformProductResponse(
         product,
-        false
+        false,
       );
 
       return ResponseUtil.success(
         res,
         response,
-        "Product retrieved successfully"
+        "Product retrieved successfully",
       );
     } catch (error) {
       next(error);
@@ -400,133 +823,133 @@ export class ProductController {
       // Transform response (include costPrice for admin)
       const response = ProductController.transformProductResponse(
         product,
-        true
+        true,
       );
 
       return ResponseUtil.success(
         res,
-        response,
-        "Product retrieved successfully"
+        parseProductArrays(response),
+        "Product retrieved successfully",
       );
     } catch (error) {
       next(error);
     }
   }
 
-  // Update product (Admin only)
-  static async update(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { id } = req.params;
-      const updateData: UpdateProductRequest = req.body;
+  // // Update product (Admin only)
+  // static async update(req: Request, res: Response, next: NextFunction) {
+  //   try {
+  //     const { id } = req.params;
+  //     const updateData: UpdateProductRequest = req.body;
 
-      // Check if product exists
-      const existingProduct = await prisma.product.findUnique({
-        where: { id: parseInt(id) },
-      });
+  //     // Check if product exists
+  //     const existingProduct = await prisma.product.findUnique({
+  //       where: { id: parseInt(id) },
+  //     });
 
-      if (!existingProduct) {
-        throw new NotFoundError("Product not found");
-      }
+  //     if (!existingProduct) {
+  //       throw new NotFoundError("Product not found");
+  //     }
 
-      // If updating slug, check for conflicts
-      if (updateData.slug && updateData.slug !== existingProduct.slug) {
-        const slugExists = await prisma.product.findUnique({
-          where: { slug: updateData.slug },
-        });
+  //     // If updating slug, check for conflicts
+  //     if (updateData.slug && updateData.slug !== existingProduct.slug) {
+  //       const slugExists = await prisma.product.findUnique({
+  //         where: { slug: updateData.slug },
+  //       });
 
-        if (slugExists) {
-          throw new ConflictError("Slug already exists");
-        }
-      }
+  //       if (slugExists) {
+  //         throw new ConflictError("Slug already exists");
+  //       }
+  //     }
 
-      // If updating SKU, check for conflicts
-      if (updateData.sku && updateData.sku !== existingProduct.sku) {
-        const skuExists = await prisma.product.findUnique({
-          where: { sku: updateData.sku },
-        });
+  //     // If updating SKU, check for conflicts
+  //     if (updateData.sku && updateData.sku !== existingProduct.sku) {
+  //       const skuExists = await prisma.product.findUnique({
+  //         where: { sku: updateData.sku },
+  //       });
 
-        if (skuExists) {
-          throw new ConflictError("SKU already exists");
-        }
-      }
+  //       if (skuExists) {
+  //         throw new ConflictError("SKU already exists");
+  //       }
+  //     }
 
-      // Validate brand if provided
-      if (updateData.brandId) {
-        const brand = await prisma.brand.findUnique({
-          where: { id: updateData.brandId },
-        });
-        if (!brand) {
-          throw new NotFoundError("Brand not found");
-        }
-      }
+  //     // Validate brand if provided
+  //     if (updateData.brandId) {
+  //       const brand = await prisma.brand.findUnique({
+  //         where: { id: updateData.brandId },
+  //       });
+  //       if (!brand) {
+  //         throw new NotFoundError("Brand not found");
+  //       }
+  //     }
 
-      // Validate category if provided
-      if (updateData.categoryId) {
-        const category = await prisma.category.findUnique({
-          where: { id: updateData.categoryId },
-        });
-        if (!category) {
-          throw new NotFoundError("Category not found");
-        }
-      }
+  //     // Validate category if provided
+  //     if (updateData.categoryId) {
+  //       const category = await prisma.category.findUnique({
+  //         where: { id: updateData.categoryId },
+  //       });
+  //       if (!category) {
+  //         throw new NotFoundError("Category not found");
+  //       }
+  //     }
 
-      // Convert arrays to JSON strings if provided
-      const dataToUpdate: any = { ...updateData };
+  //     // Convert arrays to JSON strings if provided
+  //     const dataToUpdate: any = { ...updateData };
 
-      if (updateData.effectiveFor !== undefined) {
-        dataToUpdate.effectiveFor = JsonUtil.arrayToJson(
-          updateData.effectiveFor
-        );
-      }
-      if (updateData.features !== undefined) {
-        dataToUpdate.features = JsonUtil.arrayToJson(updateData.features);
-      }
-      if (updateData.certifications !== undefined) {
-        dataToUpdate.certifications = JsonUtil.arrayToJson(
-          updateData.certifications
-        );
-      }
-      if (updateData.badges !== undefined) {
-        dataToUpdate.badges = JsonUtil.arrayToJson(updateData.badges);
-      }
+  //     if (updateData.effectiveFor !== undefined) {
+  //       dataToUpdate.effectiveFor = JsonUtil.arrayToJson(
+  //         updateData.effectiveFor
+  //       );
+  //     }
+  //     if (updateData.features !== undefined) {
+  //       dataToUpdate.features = JsonUtil.arrayToJson(updateData.features);
+  //     }
+  //     if (updateData.certifications !== undefined) {
+  //       dataToUpdate.certifications = JsonUtil.arrayToJson(
+  //         updateData.certifications
+  //       );
+  //     }
+  //     if (updateData.badges !== undefined) {
+  //       dataToUpdate.badges = JsonUtil.arrayToJson(updateData.badges);
+  //     }
 
-      // Update product
-      const product = await prisma.product.update({
-        where: { id: parseInt(id) },
-        data: dataToUpdate,
-        include: {
-          brand: true,
-          category: {
-            include: {
-              parent: {
-                include: {
-                  parent: true,
-                },
-              },
-            },
-          },
-          images: {
-            orderBy: { displayOrder: "asc" },
-          },
-          specifications: true,
-        },
-      });
+  //     // Update product
+  //     const product = await prisma.product.update({
+  //       where: { id: parseInt(id) },
+  //       data: dataToUpdate,
+  //       include: {
+  //         brand: true,
+  //         category: {
+  //           include: {
+  //             parent: {
+  //               include: {
+  //                 parent: true,
+  //               },
+  //             },
+  //           },
+  //         },
+  //         images: {
+  //           orderBy: { displayOrder: "asc" },
+  //         },
+  //         specifications: true,
+  //       },
+  //     });
 
-      // Transform response
-      const response = ProductController.transformProductResponse(
-        product,
-        true
-      );
+  //     // Transform response
+  //     const response = ProductController.transformProductResponse(
+  //       product,
+  //       true
+  //     );
 
-      return ResponseUtil.success(
-        res,
-        response,
-        "Product updated successfully"
-      );
-    } catch (error) {
-      next(error);
-    }
-  }
+  //     return ResponseUtil.success(
+  //       res,
+  //       response,
+  //       "Product updated successfully"
+  //     );
+  //   } catch (error) {
+  //     next(error);
+  //   }
+  // }
 
   // Delete product (Admin only)
   static async delete(req: Request, res: Response, next: NextFunction) {
@@ -556,12 +979,15 @@ export class ProductController {
   // Helper method to transform product response
   private static transformProductResponse(
     product: any,
-    includeCostPrice: boolean = false
+    includeCostPrice: boolean = false,
   ) {
     // Convert JSON strings back to arrays
     const effectiveFor = JsonUtil.jsonToArray(product.effectiveFor);
     const features = JsonUtil.jsonToArray(product.features);
     const certifications = JsonUtil.jsonToArray(product.certifications);
+    const howToUse = JsonUtil.jsonToArray(product.howToUse);
+    const cautions = JsonUtil.jsonToArray(product.cautions);
+    const ingredients = JsonUtil.jsonToArray(product.ingredients);
     const badges = JsonUtil.jsonToArray(product.badges);
 
     // Calculate stock status
@@ -576,7 +1002,7 @@ export class ProductController {
     let discountPercentage: number | undefined;
     if (product.originalPrice && product.originalPrice > product.price) {
       discountPercentage = Math.round(
-        ((product.originalPrice - product.price) / product.originalPrice) * 100
+        ((product.originalPrice - product.price) / product.originalPrice) * 100,
       );
     }
 
@@ -588,6 +1014,9 @@ export class ProductController {
       badges,
       stockStatus,
       discountPercentage,
+      cautions,
+      howToUse,
+      ingredients,
     };
 
     // Hide costPrice from public
@@ -647,15 +1076,15 @@ export class ProductController {
               isPrimary: image.isPrimary || false,
               displayOrder: image.displayOrder ?? index + 1,
             },
-          })
-        )
+          }),
+        ),
       );
 
       return ResponseUtil.success(
         res,
         createdImages,
         "Images added successfully",
-        201
+        201,
       );
     } catch (error) {
       next(error);
@@ -767,7 +1196,7 @@ export class ProductController {
   static async setPrimaryImage(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { id, imageId } = req.params;
@@ -800,7 +1229,7 @@ export class ProductController {
       return ResponseUtil.success(
         res,
         updatedImage,
-        "Primary image updated successfully"
+        "Primary image updated successfully",
       );
     } catch (error) {
       next(error);
@@ -842,8 +1271,8 @@ export class ProductController {
               productId: productId,
             },
             data: { displayOrder: parseInt(displayOrder.toString()) }, // ✅ Fixed: ensure integer
-          })
-        )
+          }),
+        ),
       );
 
       // Get updated images
@@ -864,7 +1293,7 @@ export class ProductController {
   static async addSpecifications(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { id } = req.params;
@@ -897,7 +1326,7 @@ export class ProductController {
       for (const spec of specifications) {
         if (!spec.key || !spec.value) {
           throw new BadRequestError(
-            "Key and value are required for all specifications"
+            "Key and value are required for all specifications",
           );
         }
       }
@@ -911,15 +1340,15 @@ export class ProductController {
               key: spec.key,
               value: spec.value,
             },
-          })
-        )
+          }),
+        ),
       );
 
       return ResponseUtil.success(
         res,
         createdSpecs,
         "Specifications added successfully",
-        201
+        201,
       );
     } catch (error) {
       next(error);
@@ -930,7 +1359,7 @@ export class ProductController {
   static async getSpecifications(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { id } = req.params;
@@ -952,7 +1381,7 @@ export class ProductController {
       return ResponseUtil.success(
         res,
         specifications,
-        "Specifications retrieved successfully"
+        "Specifications retrieved successfully",
       );
     } catch (error) {
       next(error);
@@ -963,7 +1392,7 @@ export class ProductController {
   static async updateSpecification(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { id, specId } = req.params;
@@ -994,7 +1423,7 @@ export class ProductController {
       return ResponseUtil.success(
         res,
         specification,
-        "Specification updated successfully"
+        "Specification updated successfully",
       );
     } catch (error) {
       next(error);
@@ -1005,7 +1434,7 @@ export class ProductController {
   static async deleteSpecification(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { id, specId } = req.params;
@@ -1031,7 +1460,7 @@ export class ProductController {
       return ResponseUtil.success(
         res,
         null,
-        "Specification deleted successfully"
+        "Specification deleted successfully",
       );
     } catch (error) {
       next(error);
@@ -1042,7 +1471,7 @@ export class ProductController {
   static async bulkUpdateSpecifications(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { id } = req.params;
@@ -1080,14 +1509,14 @@ export class ProductController {
               key: spec.key,
               value: spec.value,
             },
-          })
-        )
+          }),
+        ),
       );
 
       return ResponseUtil.success(
         res,
         createdSpecs,
-        "Specifications updated successfully"
+        "Specifications updated successfully",
       );
     } catch (error) {
       next(error);

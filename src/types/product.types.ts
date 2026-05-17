@@ -51,7 +51,7 @@ export interface CreateBrandRequest {
   countryOfOrigin?: string;
   metaTitle?: string;
   metaDescription?: string;
-  isFeatured?: boolean
+  isFeatured?: boolean;
 }
 
 export interface UpdateBrandRequest {
@@ -84,73 +84,70 @@ export interface BrandResponse {
 
 export interface CreateProductRequest {
   name: string;
-  slug?: string; // Auto-generate if not provided
-  sku?: string;
-  brandId?: number;
-  categoryId?: number;
-
+  shortDescription?: string;
+  longDescription?: string;
   price: number;
   originalPrice?: number;
   costPrice?: number;
-
-  shortDescription?: string;
-  longDescription?: string;
-
-  volume?: string;
-  weight?: number;
-  countryOfOrigin?: string;
-
-  effectiveFor?: string[]; // Array of strings
-  features?: string[]; // Array of strings
-  certifications?: string[]; // Array of strings
-  howToUse?: string;
-  ingredients?: string;
-  cautions?: string;
-
-  stockQuantity?: number;
+  stockQuantity: number;
   lowStockThreshold?: number;
-
+  sku?: string;
+  brandId?: number;
+  categoryId?: number;
+  isActive?: boolean;
+  isFeatured?: boolean;
+  effectiveFor?: string[];
+  features?: string[];
+  certifications?: string[];
+  howToUse?: string[];
+  ingredients?: string[];
+  cautions?: string[];
   metaTitle?: string;
   metaDescription?: string;
-
-  isFeatured?: boolean;
-  badges?: string[]; // Array of strings
+  images?: {
+    imageUrl: string;
+    altText?: string;
+    isPrimary: boolean;
+    displayOrder: number;
+  }[];
+  specifications?: {
+    key: string;
+    value: string;
+  }[];
 }
 
 export interface UpdateProductRequest {
   name?: string;
-  slug?: string;
-  sku?: string;
-  brandId?: number;
-  categoryId?: number;
-
+  shortDescription?: string;
+  longDescription?: string;
   price?: number;
   originalPrice?: number;
   costPrice?: number;
-
-  shortDescription?: string;
-  longDescription?: string;
-
-  volume?: string;
-  weight?: number;
-  countryOfOrigin?: string;
-
+  stockQuantity?: number;
+  lowStockThreshold?: number;
+  sku?: string;
+  brandId?: number;
+  categoryId?: number;
+  isActive?: boolean;
+  isFeatured?: boolean;
   effectiveFor?: string[];
   features?: string[];
   certifications?: string[];
-  howToUse?: string;
-  ingredients?: string;
-  cautions?: string;
-
-  stockQuantity?: number;
-  lowStockThreshold?: number;
-
+  howToUse?: string[];
+  ingredients?: string[];
+  cautions?: string[];
   metaTitle?: string;
   metaDescription?: string;
-
-  isActive?: boolean;
-  isFeatured?: boolean;
-  badges?: string[];
+  images?: {
+    imageUrl: string;
+    altText?: string;
+    isPrimary: boolean;
+    displayOrder: number;
+  }[];
+  specifications?: {
+    key: string;
+    value: string;
+  }[];
 }
 
 export interface ProductImageRequest {

@@ -290,6 +290,7 @@ model Order {
   // Shipping Info (Collected at checkout)
   shippingFullName     String  @map("shipping_full_name")
   shippingPhone        String  @map("shipping_phone")
+  shippingEmail        String  @map("shipping_email")
   shippingAddressLine1 String  @map("shipping_address_line1")
   shippingAddressLine2 String? @map("shipping_address_line2")
   shippingLandmark     String? @map("shipping_landmark")

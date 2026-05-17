@@ -2,6 +2,7 @@ export interface CheckoutRequest {
   shippingInfo: {
     fullName: string;
     phone: string;
+    email: string;
     addressLine1: string;
     addressLine2?: string;
     landmark?: string;
@@ -44,6 +45,7 @@ export interface OrderResponse {
   total: number;
   shippingFullName: string;
   shippingPhone: string;
+  shippingEmail: string;
   shippingAddressLine1: string;
   shippingAddressLine2: string | null;
   shippingLandmark: string | null;
@@ -80,15 +82,13 @@ export const KATHMANDU_VALLEY_CITIES = [
   "lalitpur",
   "bhaktapur",
   "kirtipur",
-  "madhyapur thimi",
-  "thimi",
 ];
 
 // ✅ UPDATED: Shipping cost configuration
 export const SHIPPING_CONFIG = {
   INSIDE_VALLEY: 100, // Rs 100 for Kathmandu Valley
   OUTSIDE_VALLEY: 200, // Rs 200 outside valley
-  FREE_SHIPPING_THRESHOLD: 2000, // Free shipping above Rs 2000
+  FREE_SHIPPING_THRESHOLD: 10000, // Free shipping above Rs 10000
 };
 
 // ✅ NEW: Helper function to check if city is in valley

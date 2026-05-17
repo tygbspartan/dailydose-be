@@ -28,7 +28,7 @@ export class ReviewController {
       // Validation
       if (!productId || !rating || !comment) {
         throw new BadRequestError(
-          "Product ID, rating, and comment are required"
+          "Product ID, rating, and comment are required",
         );
       }
 
@@ -127,7 +127,7 @@ export class ReviewController {
         res,
         reviewResponse,
         "Review submitted successfully.",
-        201
+        201,
       );
     } catch (error) {
       next(error);
@@ -165,7 +165,7 @@ export class ReviewController {
       return ResponseUtil.success(
         res,
         reviewsWithImages,
-        "Reviews retrieved successfully"
+        "Reviews retrieved successfully",
       );
     } catch (error) {
       next(error);
@@ -238,7 +238,7 @@ export class ReviewController {
       return ResponseUtil.success(
         res,
         reviewResponse,
-        "Review updated successfully."
+        "Review updated successfully.",
       );
     } catch (error) {
       next(error);
@@ -277,7 +277,7 @@ export class ReviewController {
   static async getProductReviews(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { productId } = req.params;
@@ -390,7 +390,7 @@ export class ReviewController {
 
       if (existingVote) {
         throw new ConflictError(
-          "You have already marked this review as helpful"
+          "You have already marked this review as helpful",
         );
       }
 
@@ -415,7 +415,7 @@ export class ReviewController {
       return ResponseUtil.success(
         res,
         null,
-        "Review marked as helpful successfully"
+        "Review marked as helpful successfully",
       );
     } catch (error) {
       next(error);
@@ -467,7 +467,7 @@ export class ReviewController {
       return ResponseUtil.success(
         res,
         null,
-        "Helpful vote removed successfully"
+        "Helpful vote removed successfully",
       );
     } catch (error) {
       next(error);
@@ -479,7 +479,7 @@ export class ReviewController {
   // Get all reviews (Admin)
   static async getAllReviews(req: Request, res: Response, next: NextFunction) {
     try {
-      const { isApproved, rating, page = 1, limit = 20 } = req.query;
+      const { isApproved, rating, page = 1, limit = 20, search } = req.query;
 
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
@@ -494,6 +494,28 @@ export class ReviewController {
 
       if (rating) {
         where.rating = parseInt(rating as string);
+      }
+
+      if (search) {
+        where.OR = [
+          { title: { contains: search as string, mode: "insensitive" } },
+          {
+            product: {
+              name: {
+                contains: search as string,
+                mode: "insensitive",
+              },
+            },
+          },
+          {
+            user: {
+              firstName: {
+                contains: search as string,
+                mode: "insensitive",
+              },
+            },
+          },
+        ];
       }
 
       // Get reviews with pagination
@@ -540,7 +562,7 @@ export class ReviewController {
             totalPages: Math.ceil(total / limitNum),
           },
         },
-        "Reviews retrieved successfully"
+        "Reviews retrieved successfully",
       );
     } catch (error) {
       next(error);
@@ -602,7 +624,7 @@ export class ReviewController {
       return ResponseUtil.success(
         res,
         reviewResponse,
-        `Review ${isApproved ? "approved" : "rejected"} successfully`
+        `Review ${isApproved ? "approved" : "rejected"} successfully`,
       );
     } catch (error) {
       next(error);

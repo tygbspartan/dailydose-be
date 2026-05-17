@@ -1,3 +1,4 @@
+import { EmailService } from "./../services/email.service";
 import { Request, Response, NextFunction } from "express";
 import prisma from "../config/database.config";
 import { ResponseUtil } from "../utils/response.util";
@@ -18,6 +19,11 @@ import {
   PAYMENT_METHODS,
   requiresTransactionNumber,
 } from "../constants/payment.constants";
+import {
+  generateCustomerOrderEmail,
+  generateAdminOrderNotification,
+} from "../templates/orderEmails";
+import { config } from "../config/env.config";
 
 export class OrderController {
   // Checkout - Create order from cart
@@ -38,12 +44,13 @@ export class OrderController {
         !shippingInfo ||
         !shippingInfo.fullName ||
         !shippingInfo.phone ||
+        !shippingInfo.email ||
         !shippingInfo.addressLine1 ||
         !shippingInfo.city ||
         !shippingInfo.postalCode
       ) {
         throw new BadRequestError(
-          "Full name, phone, address, city, and postal code are required"
+          "Full name, phone, email, address, city, and postal code are required",
         );
       }
 
@@ -56,8 +63,8 @@ export class OrderController {
       if (!validPaymentMethods.includes(paymentMethod as any)) {
         throw new BadRequestError(
           `Invalid payment method. Must be one of: ${validPaymentMethods.join(
-            ", "
-          )}`
+            ", ",
+          )}`,
         );
       }
 
@@ -65,7 +72,7 @@ export class OrderController {
       if (requiresTransactionNumber(paymentMethod)) {
         if (!transactionNumber || transactionNumber.trim() === "") {
           throw new BadRequestError(
-            "Transaction number is required for online payments (eSewa, Khalti, Bank Transfer)"
+            "Transaction number is required for online payments (eSewa, Khalti, Bank Transfer)",
           );
         }
       }
@@ -93,13 +100,13 @@ export class OrderController {
       for (const item of cartItems) {
         if (!item.product.isActive) {
           throw new BadRequestError(
-            `Product "${item.product.name}" is no longer available`
+            `Product "${item.product.name}" is no longer available`,
           );
         }
 
         if (item.product.stockQuantity < item.quantity) {
           throw new BadRequestError(
-            `Insufficient stock for "${item.product.name}". Only ${item.product.stockQuantity} available.`
+            `Insufficient stock for "${item.product.name}". Only ${item.product.stockQuantity} available.`,
           );
         }
       }
@@ -127,7 +134,8 @@ export class OrderController {
         ];
 
         const isInsideValley = valleyCities.some(
-          (valleyCity) => city.includes(valleyCity) || valleyCity.includes(city)
+          (valleyCity) =>
+            city.includes(valleyCity) || valleyCity.includes(city),
         );
 
         shippingCost = isInsideValley
@@ -206,6 +214,7 @@ export class OrderController {
             total,
             shippingFullName: shippingInfo.fullName,
             shippingPhone: shippingInfo.phone,
+            shippingEmail: shippingInfo.email,
             shippingAddressLine1: shippingInfo.addressLine1,
             shippingAddressLine2: shippingInfo.addressLine2,
             shippingLandmark: shippingInfo.landmark,
@@ -276,8 +285,83 @@ export class OrderController {
           },
         });
       });
+      // Format order date
+      if (order) {
+        const orderDate = new Date(order!.createdAt).toLocaleDateString(
+          "en-US",
+          {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          },
+        );
 
-      return ResponseUtil.success(res, order, "Order placed successfully", 201);
+        // Format shipping address
+        const shippingAddress = `
+                                ${order.shippingFullName}
+                                ${order.shippingAddressLine1}
+                                ${
+                                  order.shippingAddressLine2
+                                    ? order.shippingAddressLine2 + "\n"
+                                    : ""
+                                }
+                                ${order.shippingCity}, ${
+                                  order.shippingProvince
+                                } ${order.shippingPostalCode ? order.shippingPostalCode : ""}
+                                Phone: ${order.shippingPhone}
+                                `.trim();
+
+        // Prepare order items for email
+        const orderItems = order.items.map((item) => ({
+          name: item.productName,
+          quantity: item.quantity,
+          price: parseFloat(item.price.toString()),
+        }));
+
+        const emailData = {
+          customerName: order.shippingFullName,
+          orderNumber: order.orderNumber,
+          orderDate,
+          items: orderItems,
+          subtotal: parseFloat(order.subtotal.toString()),
+          shippingCost: parseFloat(order.shippingCost.toString()),
+          discount: parseFloat(order.discount.toString()),
+          total: parseFloat(order.total.toString()),
+          paymentMethod: order.paymentMethod || "Cash on Delivery",
+          shippingAddress,
+        };
+
+        // Send email to customer
+        try {
+          await EmailService.sendEmail({
+            to: order.shippingEmail,
+            subject: `Order Confirmation - ${order.orderNumber}`,
+            html: generateCustomerOrderEmail(emailData),
+          });
+        } catch (emailError) {
+          console.error("Failed to send customer email:", emailError);
+          // Don't fail the order if email fails
+        }
+
+        // Send notification to admin
+        try {
+          const adminEmail = config.emailUser || "admin@dailydose.com";
+          await EmailService.sendEmail({
+            to: adminEmail,
+            subject: `🔔 New Order Received - ${order.orderNumber}`,
+            html: generateAdminOrderNotification({
+              ...emailData,
+              customerEmail: order.shippingEmail,
+              customerPhone: order.shippingPhone,
+            }),
+          });
+        } catch (emailError) {
+          console.error("Failed to send admin notification:", emailError);
+          // Don't fail the order if email fails
+        }
+      }
 
       return ResponseUtil.success(res, order, "Order placed successfully", 201);
     } catch (error) {
@@ -288,17 +372,74 @@ export class OrderController {
   // Get user's orders
   static async getUserOrders(req: Request, res: Response, next: NextFunction) {
     try {
+      const { status, paymentStatus, page = 1, limit = 20, search } = req.query;
+      const pageNum = parseInt(page as string);
+      const limitNum = parseInt(limit as string);
+      const skip = (pageNum - 1) * limitNum;
       const jwtPayload = (req as any).jwtPayload as JwtPayload;
 
-      const orders = await prisma.order.findMany({
-        where: { userId: jwtPayload.userId },
-        include: {
-          items: true,
-        },
-        orderBy: { createdAt: "desc" },
-      });
+      const where: any = { userId: jwtPayload.userId };
 
-      return ResponseUtil.success(res, orders, "Orders retrieved successfully");
+      if (status) {
+        where.status = status;
+      }
+
+      if (paymentStatus) {
+        where.paymentStatus = paymentStatus;
+      }
+
+      if (search) {
+        where.OR = [
+          { orderNumber: { contains: search as string, mode: "insensitive" } },
+          {
+            shippingFullName: {
+              contains: search as string,
+              mode: "insensitive",
+            },
+          },
+          {
+            shippingPhone: {
+              contains: search as string,
+              mode: "insensitive",
+            },
+          },
+        ];
+      }
+
+      const [orders, total] = await Promise.all([
+        prisma.order.findMany({
+          where,
+          include: {
+            items: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+          skip,
+          take: limitNum,
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.order.count({ where }),
+      ]);
+
+      return ResponseUtil.success(
+        res,
+        {
+          data: orders,
+          pagination: {
+            page: pageNum,
+            limit: limitNum,
+            total,
+            totalPages: Math.ceil(total / limitNum),
+          },
+        },
+        "Orders retrieved successfully",
+      );
     } catch (error) {
       next(error);
     }
@@ -308,7 +449,7 @@ export class OrderController {
   static async getOrderByNumber(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { orderNumber } = req.params;
@@ -341,7 +482,7 @@ export class OrderController {
   // Get all orders (Admin)
   static async getAllOrders(req: Request, res: Response, next: NextFunction) {
     try {
-      const { status, paymentStatus, page = 1, limit = 20 } = req.query;
+      const { status, paymentStatus, page = 1, limit = 20, search } = req.query;
 
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
@@ -356,6 +497,24 @@ export class OrderController {
 
       if (paymentStatus) {
         where.paymentStatus = paymentStatus;
+      }
+
+      if (search) {
+        where.OR = [
+          { orderNumber: { contains: search as string, mode: "insensitive" } },
+          {
+            shippingFullName: {
+              contains: search as string,
+              mode: "insensitive",
+            },
+          },
+          {
+            shippingPhone: {
+              contains: search as string,
+              mode: "insensitive",
+            },
+          },
+        ];
       }
 
       // Get orders with pagination
@@ -391,7 +550,7 @@ export class OrderController {
             totalPages: Math.ceil(total / limitNum),
           },
         },
-        "Orders retrieved successfully"
+        "Orders retrieved successfully",
       );
     } catch (error) {
       next(error);
@@ -434,7 +593,7 @@ export class OrderController {
   static async updateOrderStatus(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { id } = req.params;
@@ -457,7 +616,7 @@ export class OrderController {
 
       if (!validStatuses.includes(status)) {
         throw new BadRequestError(
-          `Invalid status. Must be one of: ${validStatuses.join(", ")}`
+          `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
         );
       }
 
@@ -537,7 +696,7 @@ export class OrderController {
       return ResponseUtil.success(
         res,
         order,
-        "Order status updated successfully"
+        "Order status updated successfully",
       );
     } catch (error) {
       next(error);
@@ -548,7 +707,7 @@ export class OrderController {
   static async updatePaymentStatus(
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
   ) {
     try {
       const { id } = req.params;
@@ -564,7 +723,7 @@ export class OrderController {
 
       if (!validStatuses.includes(paymentStatus)) {
         throw new BadRequestError(
-          `Invalid payment status. Must be one of: ${validStatuses.join(", ")}`
+          `Invalid payment status. Must be one of: ${validStatuses.join(", ")}`,
         );
       }
 
@@ -592,7 +751,7 @@ export class OrderController {
       return ResponseUtil.success(
         res,
         order,
-        "Payment status updated successfully"
+        "Payment status updated successfully",
       );
     } catch (error) {
       next(error);

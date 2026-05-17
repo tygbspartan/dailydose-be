@@ -6,9 +6,10 @@ const router = Router();
 
 // ==================== PUBLIC ROUTES ====================
 router.get("/", ProductController.getAll);
+router.get("/discounted", ProductController.getDiscountedProducts);
 router.get("/slug/:slug", ProductController.getBySlug);
 router.get("/:id/images", ProductController.getImages);
-router.get("/:id/specifications", ProductController.getSpecifications); // ✅ NEW
+router.get("/:id/specifications", ProductController.getSpecifications);
 
 // ==================== ADMIN ROUTES ====================
 
@@ -24,13 +25,13 @@ router.put(
   "/:id/images/reorder",
   authenticate,
   isAdmin,
-  ProductController.reorderImages
+  ProductController.reorderImages,
 );
 router.patch(
   "/:id/images/:imageId/primary",
   authenticate,
   isAdmin,
-  ProductController.setPrimaryImage
+  ProductController.setPrimaryImage,
 );
 
 // Product Images - Generic parameterized routes last
@@ -38,13 +39,13 @@ router.put(
   "/:id/images/:imageId",
   authenticate,
   isAdmin,
-  ProductController.updateImage
+  ProductController.updateImage,
 );
 router.delete(
   "/:id/images/:imageId",
   authenticate,
   isAdmin,
-  ProductController.deleteImage
+  ProductController.deleteImage,
 );
 
 // Product Specifications - ✅ NEW
@@ -52,25 +53,25 @@ router.post(
   "/:id/specifications",
   authenticate,
   isAdmin,
-  ProductController.addSpecifications
+  ProductController.addSpecifications,
 );
 router.put(
   "/:id/specifications/bulk",
   authenticate,
   isAdmin,
-  ProductController.bulkUpdateSpecifications
+  ProductController.bulkUpdateSpecifications,
 );
 router.put(
   "/:id/specifications/:specId",
   authenticate,
   isAdmin,
-  ProductController.updateSpecification
+  ProductController.updateSpecification,
 );
 router.delete(
   "/:id/specifications/:specId",
   authenticate,
   isAdmin,
-  ProductController.deleteSpecification
+  ProductController.deleteSpecification,
 );
 
 export default router;
