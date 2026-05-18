@@ -2,14 +2,11 @@
 
 export interface CreateCategoryRequest {
   name: string;
-  slug?: string; // Auto-generate if not provided
+  slug?: string;
   description?: string;
   parentId?: number;
   level: number; // 1, 2, or 3
-  imageUrl?: string;
   displayOrder?: number;
-  metaTitle?: string;
-  metaDescription?: string;
 }
 
 export interface UpdateCategoryRequest {
@@ -17,11 +14,8 @@ export interface UpdateCategoryRequest {
   slug?: string;
   description?: string;
   parentId?: number;
-  imageUrl?: string;
   displayOrder?: number;
   isActive?: boolean;
-  metaTitle?: string;
-  metaDescription?: string;
 }
 
 export interface CategoryResponse {
@@ -31,7 +25,6 @@ export interface CategoryResponse {
   description: string | null;
   parentId: number | null;
   level: number;
-  imageUrl: string | null;
   displayOrder: number;
   isActive: boolean;
   createdAt: Date;
@@ -45,10 +38,9 @@ export interface CategoryResponse {
 
 export interface CreateBrandRequest {
   name: string;
-  slug?: string; // Auto-generate if not provided
+  slug?: string;
   description?: string;
   logoUrl?: string;
-  countryOfOrigin?: string;
   metaTitle?: string;
   metaDescription?: string;
   isFeatured?: boolean;
@@ -59,7 +51,6 @@ export interface UpdateBrandRequest {
   slug?: string;
   description?: string;
   logoUrl?: string;
-  countryOfOrigin?: string;
   isActive?: boolean;
   isFeatured?: boolean;
   metaTitle?: string;
@@ -72,7 +63,6 @@ export interface BrandResponse {
   slug: string;
   description: string | null;
   logoUrl: string | null;
-  countryOfOrigin: string | null;
   isActive: boolean;
   isFeatured: boolean;
   createdAt: Date;

@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ==================== USER & AUTH (Already exists - don't touch) ====================
@@ -51,13 +52,8 @@ model Category {
   parentId Int? @map("parent_id") // NULL for Level 1, points to parent for Level 2 & 3
   level    Int  @default(1) // 1 = Main (Personal Care), 2 = Sub (Skin Care), 3 = Group (Face Masks)
 
-  imageUrl     String? @map("image_url")
   displayOrder Int     @default(0) @map("display_order") // For sorting
   isActive     Boolean @default(true) @map("is_active")
-
-  // SEO
-  metaTitle       String? @map("meta_title")
-  metaDescription String? @map("meta_description")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -84,9 +80,8 @@ model Brand {
   name            String // e.g., "Pax Moly"
   slug            String  @unique // e.g., "pax-moly"
   description     String?
-  logoUrl         String? @map("logo_url")
-  countryOfOrigin String? @map("country_of_origin") // e.g., "Korea"
-  isActive        Boolean @default(true) @map("is_active")
+  logoUrl  String? @map("logo_url")
+  isActive Boolean @default(true) @map("is_active")
   isFeatured      Boolean @default(false) @map("is_featured")
 
   // SEO

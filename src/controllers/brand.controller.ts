@@ -18,10 +18,9 @@ export class BrandController {
         slug,
         description,
         logoUrl,
-        countryOfOrigin,
         metaTitle,
         metaDescription,
-        isFeatured
+        isFeatured,
       }: CreateBrandRequest = req.body;
 
       // Validation
@@ -50,10 +49,9 @@ export class BrandController {
           slug: brandSlug,
           description,
           logoUrl,
-          countryOfOrigin,
           metaTitle,
           metaDescription,
-          isFeatured
+          isFeatured,
         },
       });
 
@@ -71,7 +69,7 @@ export class BrandController {
   // Get all brands (Public)
   static async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const { isActive, isFeatured, countryOfOrigin } = req.query;
+      const { isActive, isFeatured } = req.query;
 
       // Build filter
       const where: any = {};
@@ -82,10 +80,6 @@ export class BrandController {
 
       if (isFeatured !== undefined) {
         where.isFeatured = isFeatured === "true";
-      }
-
-      if (countryOfOrigin) {
-        where.countryOfOrigin = countryOfOrigin as string;
       }
 
       const brands = await prisma.brand.findMany({

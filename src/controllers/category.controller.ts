@@ -22,10 +22,7 @@ export class CategoryController {
         description,
         parentId,
         level,
-        imageUrl,
         displayOrder,
-        metaTitle,
-        metaDescription,
       }: CreateCategoryRequest = req.body;
 
       // Validation
@@ -84,10 +81,7 @@ export class CategoryController {
           description,
           parentId,
           level,
-          imageUrl,
           displayOrder: displayOrder || 0,
-          metaTitle,
-          metaDescription,
         },
         include: {
           parent: true,
