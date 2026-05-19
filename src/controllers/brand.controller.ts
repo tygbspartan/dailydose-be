@@ -8,6 +8,7 @@ import {
   ConflictError,
 } from "../utils/customError.util";
 import { CreateBrandRequest, UpdateBrandRequest } from "../types/product.types";
+import { StorageService } from "../services/storage.service";
 
 export class BrandController {
   // Create brand (Admin only)
@@ -230,7 +231,15 @@ export class BrandController {
         }
       }
 
-      // Update brand
+      // If a new logoUrl is being set via URL, delete the old file from storage
+      if (
+        updateData.logoUrl !== undefined &&
+        updateData.logoUrl !== existingBrand.logoUrl &&
+        existingBrand.logoUrl
+      ) {
+        await StorageService.deleteImage(existingBrand.logoUrl);
+      }
+
       const brand = await prisma.brand.update({
         where: { id: parseInt(id) },
         data: updateData,
@@ -270,12 +279,78 @@ export class BrandController {
         );
       }
 
-      // Delete brand
-      await prisma.brand.delete({
-        where: { id: parseInt(id) },
-      });
+      // Delete logo from storage if it exists
+      if (brand.logoUrl) {
+        await StorageService.deleteImage(brand.logoUrl);
+      }
+
+      await prisma.brand.delete({ where: { id: parseInt(id) } });
 
       return ResponseUtil.success(res, null, "Brand deleted successfully");
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Upload logo file to Supabase Storage (Admin only)
+  static async uploadLogo(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const brandId = parseInt(id);
+      const file = req.file;
+
+      if (!file) {
+        throw new BadRequestError("Logo file is required");
+      }
+
+      const brand = await prisma.brand.findUnique({ where: { id: brandId } });
+
+      if (!brand) {
+        throw new NotFoundError("Brand not found");
+      }
+
+      // Delete old logo from storage before uploading new one
+      if (brand.logoUrl) {
+        await StorageService.deleteImage(brand.logoUrl);
+      }
+
+      const logoUrl = await StorageService.uploadImage(file, "brands");
+
+      const updated = await prisma.brand.update({
+        where: { id: brandId },
+        data: { logoUrl },
+      });
+
+      return ResponseUtil.success(res, updated, "Logo uploaded successfully");
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Delete brand logo from storage and clear the field (Admin only)
+  static async deleteLogo(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const brandId = parseInt(id);
+
+      const brand = await prisma.brand.findUnique({ where: { id: brandId } });
+
+      if (!brand) {
+        throw new NotFoundError("Brand not found");
+      }
+
+      if (!brand.logoUrl) {
+        throw new BadRequestError("Brand has no logo to delete");
+      }
+
+      await StorageService.deleteImage(brand.logoUrl);
+
+      const updated = await prisma.brand.update({
+        where: { id: brandId },
+        data: { logoUrl: null },
+      });
+
+      return ResponseUtil.success(res, updated, "Logo deleted successfully");
     } catch (error) {
       next(error);
     }
