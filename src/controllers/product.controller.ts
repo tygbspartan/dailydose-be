@@ -14,6 +14,7 @@ import {
   ProductSpecificationRequest,
   UpdateProductRequest,
 } from "../types/product.types";
+import { StorageService } from "../services/storage.service";
 
 // Helper function to parse JSON fields
 const parseProductArrays = (product: any) => {
@@ -955,20 +956,27 @@ export class ProductController {
   static async delete(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+      const productId = parseInt(id);
 
-      // Check if product exists
+      // Fetch product with images so we can clean up storage
       const product = await prisma.product.findUnique({
-        where: { id: parseInt(id) },
+        where: { id: productId },
+        include: { images: true },
       });
 
       if (!product) {
         throw new NotFoundError("Product not found");
       }
 
-      // Delete product (cascade will delete images and specifications)
-      await prisma.product.delete({
-        where: { id: parseInt(id) },
-      });
+      // Delete all images from Supabase Storage before removing DB record
+      if (product.images.length > 0) {
+        await StorageService.deleteImages(
+          product.images.map((img) => img.imageUrl),
+        );
+      }
+
+      // Delete product — cascade removes ProductImage rows from DB
+      await prisma.product.delete({ where: { id: productId } });
 
       return ResponseUtil.success(res, null, "Product deleted successfully");
     } catch (error) {
@@ -1168,23 +1176,20 @@ export class ProductController {
     try {
       const { id, imageId } = req.params;
 
-      // Parse IDs to integers
       const productId = parseInt(id);
       const imageIdInt = parseInt(imageId);
 
-      // Check if image exists
       const image = await prisma.productImage.findUnique({
-        where: { id: imageIdInt }, // ✅ Fixed: use parsed integer
+        where: { id: imageIdInt },
       });
 
       if (!image || image.productId !== productId) {
         throw new NotFoundError("Image not found");
       }
 
-      // Delete image
-      await prisma.productImage.delete({
-        where: { id: imageIdInt }, // ✅ Fixed: use parsed integer
-      });
+      // Delete from Supabase Storage, then remove DB record
+      await StorageService.deleteImage(image.imageUrl);
+      await prisma.productImage.delete({ where: { id: imageIdInt } });
 
       return ResponseUtil.success(res, null, "Image deleted successfully");
     } catch (error) {
@@ -1231,6 +1236,49 @@ export class ProductController {
         updatedImage,
         "Primary image updated successfully",
       );
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Upload image file to Supabase Storage and attach to product (Admin only)
+  static async uploadImage(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const productId = parseInt(id);
+      const file = req.file;
+
+      if (!file) {
+        throw new BadRequestError("Image file is required");
+      }
+
+      const product = await prisma.product.findUnique({
+        where: { id: productId },
+      });
+
+      if (!product) {
+        throw new NotFoundError("Product not found");
+      }
+
+      // Upload to Supabase Storage
+      const imageUrl = await StorageService.uploadImage(file, "products");
+
+      // Check if this product has any images yet (first image becomes primary)
+      const existingCount = await prisma.productImage.count({
+        where: { productId },
+      });
+
+      const image = await prisma.productImage.create({
+        data: {
+          productId,
+          imageUrl,
+          altText: product.name,
+          isPrimary: existingCount === 0,
+          displayOrder: existingCount,
+        },
+      });
+
+      return ResponseUtil.success(res, image, "Image uploaded successfully", 201);
     } catch (error) {
       next(error);
     }

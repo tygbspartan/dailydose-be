@@ -36,6 +36,11 @@ interface EnvConfig {
   // Token Expiry
   verificationTokenExpiry: string;
   passwordResetTokenExpiry: string;
+
+  // Supabase Storage
+  supabaseUrl: string;
+  supabaseServiceRoleKey: string;
+  supabaseStorageBucket: string;
 }
 
 const getEnvVariable = (key: string, defaultValue?: string): string => {
@@ -80,6 +85,11 @@ export const config: EnvConfig = {
   // Token Expiry
   verificationTokenExpiry: getEnvVariable('VERIFICATION_TOKEN_EXPIRY', '24h'),
   passwordResetTokenExpiry: getEnvVariable('PASSWORD_RESET_TOKEN_EXPIRY', '1h'),
+
+  // Supabase Storage
+  supabaseUrl: getEnvVariable('SUPABASE_URL'),
+  supabaseServiceRoleKey: getEnvVariable('SUPABASE_SERVICE_ROLE_KEY'),
+  supabaseStorageBucket: getEnvVariable('SUPABASE_STORAGE_BUCKET', 'images'),
 };
 
 // Validate critical env variables on startup
@@ -96,6 +106,8 @@ export const validateEnv = (): void => {
     'GOOGLE_CLIENT_SECRET',
     'ADMIN_EMAIL',
     'ADMIN_PASSWORD',
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
   ];
   
   const missing: string[] = [];

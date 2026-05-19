@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
 import { authenticate, isAdmin } from "../middleware/auth.middleware";
+import { upload } from "../middleware/upload.middleware";
 
 const router = Router();
 
@@ -20,6 +21,15 @@ router.put("/:id", authenticate, isAdmin, ProductController.update);
 router.delete("/:id", authenticate, isAdmin, ProductController.delete);
 
 // Product Images - Specific routes first!
+// Upload a file directly (multipart/form-data, field name: "image")
+router.post(
+  "/:id/images/upload",
+  authenticate,
+  isAdmin,
+  upload.single("image"),
+  ProductController.uploadImage,
+);
+// Add images by URL (existing behaviour)
 router.post("/:id/images", authenticate, isAdmin, ProductController.addImages);
 router.put(
   "/:id/images/reorder",
