@@ -14,7 +14,14 @@ export interface CheckoutRequest {
   paymentMethod: "cod" | "esewa" | "khalti" | "bank_transfer";
   transactionNumber?: string;
   customerNote?: string;
-  discountCode?: string; 
+  discountCode?: string;
+  /** Cart item IDs to check out. If omitted, the entire cart is checked out. (Logged-in users only.) */
+  cartItemIds?: number[];
+  /**
+   * Items to check out for GUEST checkout (no auth token).
+   * Logged-in users ignore this and use their DB cart instead.
+   */
+  items?: { productId: number; quantity: number }[];
 }
 
 export interface UpdateOrderStatusRequest {
@@ -36,7 +43,7 @@ export interface UpdatePaymentStatusRequest {
 export interface OrderResponse {
   id: number;
   orderNumber: string;
-  userId: number;
+  userId: number | null;
   status: string;
   subtotal: number;
   shippingCost: number;
@@ -70,6 +77,7 @@ export interface OrderItemResponse {
   productName: string;
   productSku: string | null;
   productImage: string | null;
+  productSize: string | null;
   price: number;
   quantity: number;
   subtotal: number;

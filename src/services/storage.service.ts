@@ -15,7 +15,7 @@ export const StorageService = {
    */
   async uploadImage(
     file: Express.Multer.File,
-    folder: "products" | "brands" | "categories" = "products",
+    folder: "products" | "brands" | "categories" | "hero" = "products",
   ): Promise<string> {
     const ext = file.originalname.split(".").pop()?.toLowerCase() || "jpg";
     const filename = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;

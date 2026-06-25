@@ -35,9 +35,11 @@ export class OrderController {
         transactionNumber,
         customerNote,
         discountCode,
+        cartItemIds,
+        items: guestItems,
       }: CheckoutRequest = req.body;
 
-      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const jwtPayload = (req as any).jwtPayload as JwtPayload | undefined;
 
       // Validation - Shipping Info
       if (
@@ -77,27 +79,105 @@ export class OrderController {
         }
       }
 
-      // Get user's cart
-      const cartItems = await prisma.cartItem.findMany({
-        where: { userId: jwtPayload.userId },
-        include: {
-          product: {
-            include: {
-              images: {
-                where: { isPrimary: true },
-                take: 1,
+      // Build a unified list of line items for both logged-in and guest flows.
+      // For logged-in users, cartItemIds carries the originating CartItem ids so
+      // they can be deleted after checkout; for guests it stays empty.
+      type LineItem = {
+        product: any;
+        quantity: number;
+        size: string | null;
+        cartItemId: number | null;
+      };
+      let lineItems: LineItem[] = [];
+      const checkedOutCartItemIds: number[] = [];
+
+      if (jwtPayload) {
+        // ===== Logged-in: source items from the DB cart =====
+        const cartWhere: any = { userId: jwtPayload.userId };
+        if (cartItemIds && cartItemIds.length > 0) {
+          cartWhere.id = { in: cartItemIds };
+        }
+
+        // Get selected (or all) cart items
+        const cartItems = await prisma.cartItem.findMany({
+          where: cartWhere,
+          include: {
+            product: {
+              include: {
+                images: {
+                  where: { isPrimary: true },
+                  take: 1,
+                },
               },
             },
           },
-        },
-      });
+        });
 
-      if (cartItems.length === 0) {
-        throw new BadRequestError("Cart is empty. Add items before checkout.");
+        if (cartItems.length === 0) {
+          throw new BadRequestError(
+            cartItemIds && cartItemIds.length > 0
+              ? "None of the selected cart items were found."
+              : "Cart is empty. Add items before checkout.",
+          );
+        }
+
+        // Guard: ensure every requested ID actually belongs to this user
+        if (cartItemIds && cartItemIds.length > 0) {
+          const foundIds = new Set(cartItems.map((c) => c.id));
+          const missing = cartItemIds.filter((id) => !foundIds.has(id));
+          if (missing.length > 0) {
+            throw new BadRequestError(
+              `Cart item(s) not found: ${missing.join(", ")}`,
+            );
+          }
+        }
+
+        lineItems = cartItems.map((item) => ({
+          product: item.product,
+          quantity: item.quantity,
+          size: (item as any).size ?? null,
+          cartItemId: item.id,
+        }));
+        checkedOutCartItemIds.push(...cartItems.map((c) => c.id));
+      } else {
+        // ===== Guest: source items from the request body =====
+        if (!guestItems || guestItems.length === 0) {
+          throw new BadRequestError("No items to checkout");
+        }
+
+        const productIds = guestItems.map((i) => i.productId);
+        const products = await prisma.product.findMany({
+          where: { id: { in: productIds } },
+          include: {
+            images: {
+              where: { isPrimary: true },
+              take: 1,
+            },
+          },
+        });
+        const productMap = new Map(products.map((p) => [p.id, p]));
+
+        for (const gi of guestItems) {
+          const product = productMap.get(gi.productId);
+          if (!product) {
+            throw new BadRequestError(`Product not found: ${gi.productId}`);
+          }
+          if (!gi.quantity || gi.quantity < 1) {
+            throw new BadRequestError(
+              `Invalid quantity for product "${product.name}"`,
+            );
+          }
+          lineItems.push({
+            product,
+            quantity: gi.quantity,
+            size: null,
+            cartItemId: null,
+          });
+        }
       }
 
       // Validate stock availability
-      for (const item of cartItems) {
+      for (const item of lineItems) {
         if (!item.product.isActive) {
           throw new BadRequestError(
             `Product "${item.product.name}" is no longer available`,
@@ -113,7 +193,7 @@ export class OrderController {
 
       // Calculate totals
       let subtotal = 0;
-      cartItems.forEach((item) => {
+      lineItems.forEach((item) => {
         subtotal += Number(item.product.price) * item.quantity;
       });
 
@@ -205,7 +285,7 @@ export class OrderController {
         const newOrder = await tx.order.create({
           data: {
             orderNumber,
-            userId: jwtPayload.userId,
+            userId: jwtPayload ? jwtPayload.userId : null,
             status: "pending",
             subtotal,
             shippingCost,
@@ -233,7 +313,7 @@ export class OrderController {
         });
 
         // 2. Create order items and update stock
-        for (const item of cartItems) {
+        for (const item of lineItems) {
           // Create order item (snapshot of product at time of order)
           await tx.orderItem.create({
             data: {
@@ -242,6 +322,7 @@ export class OrderController {
               productName: item.product.name,
               productSku: item.product.sku,
               productImage: item.product.images[0]?.imageUrl || null,
+              productSize: item.size,
               price: item.product.price,
               quantity: item.quantity,
               subtotal: Number(item.product.price) * item.quantity,
@@ -259,10 +340,13 @@ export class OrderController {
           });
         }
 
-        // 3. Clear user's cart
-        await tx.cartItem.deleteMany({
-          where: { userId: jwtPayload.userId },
-        });
+        // 3. Remove only the checked-out items from cart (leave others untouched).
+        //    Guests have no DB cart, so nothing to delete.
+        if (checkedOutCartItemIds.length > 0) {
+          await tx.cartItem.deleteMany({
+            where: { id: { in: checkedOutCartItemIds } },
+          });
+        }
 
         // 4. Increment discount usage count (if discount was applied)
         if (discountId) {
@@ -285,35 +369,26 @@ export class OrderController {
           },
         });
       });
-      // Format order date
+      // Send emails in background — don't block the response
       if (order) {
-        const orderDate = new Date(order!.createdAt).toLocaleDateString(
-          "en-US",
-          {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          },
-        );
+        const orderDate = new Date(order.createdAt).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
 
-        // Format shipping address
-        const shippingAddress = `
-                                ${order.shippingFullName}
-                                ${order.shippingAddressLine1}
-                                ${
-                                  order.shippingAddressLine2
-                                    ? order.shippingAddressLine2 + "\n"
-                                    : ""
-                                }
-                                ${order.shippingCity}, ${
-                                  order.shippingProvince
-                                } ${order.shippingPostalCode ? order.shippingPostalCode : ""}
-                                Phone: ${order.shippingPhone}
-                                `.trim();
+        const shippingAddress = [
+          order.shippingFullName,
+          order.shippingAddressLine1,
+          order.shippingAddressLine2,
+          `${order.shippingCity}, ${order.shippingProvince} ${order.shippingPostalCode ?? ""}`,
+          `Phone: ${order.shippingPhone}`,
+        ]
+          .filter(Boolean)
+          .join("\n");
 
-        // Prepare order items for email
         const orderItems = order.items.map((item) => ({
           name: item.productName,
           quantity: item.quantity,
@@ -333,34 +408,22 @@ export class OrderController {
           shippingAddress,
         };
 
-        // Send email to customer
-        try {
-          await EmailService.sendEmail({
-            to: order.shippingEmail,
-            subject: `Order Confirmation - ${order.orderNumber}`,
-            html: generateCustomerOrderEmail(emailData),
-          });
-        } catch (emailError) {
-          console.error("Failed to send customer email:", emailError);
-          // Don't fail the order if email fails
-        }
+        // Fire-and-forget both emails — order is saved, no reason to block customer
+        void EmailService.sendEmail({
+          to: order.shippingEmail,
+          subject: `Order Confirmation - ${order.orderNumber}`,
+          html: generateCustomerOrderEmail(emailData),
+        }).catch((err) => console.error("Customer email failed:", err));
 
-        // Send notification to admin
-        try {
-          const adminEmail = config.emailUser || "admin@dailydose.com";
-          await EmailService.sendEmail({
-            to: adminEmail,
-            subject: `🔔 New Order Received - ${order.orderNumber}`,
-            html: generateAdminOrderNotification({
-              ...emailData,
-              customerEmail: order.shippingEmail,
-              customerPhone: order.shippingPhone,
-            }),
-          });
-        } catch (emailError) {
-          console.error("Failed to send admin notification:", emailError);
-          // Don't fail the order if email fails
-        }
+        void EmailService.sendEmail({
+          to: config.emailUser || "admin@dailydose.com",
+          subject: `New Order Received - ${order.orderNumber}`,
+          html: generateAdminOrderNotification({
+            ...emailData,
+            customerEmail: order.shippingEmail,
+            customerPhone: order.shippingPhone,
+          }),
+        }).catch((err) => console.error("Admin email failed:", err));
       }
 
       return ResponseUtil.success(res, order, "Order placed successfully", 201);
@@ -410,7 +473,13 @@ export class OrderController {
         prisma.order.findMany({
           where,
           include: {
-            items: true,
+            items: {
+              include: {
+                product: {
+                  include: { brand: true },
+                },
+              },
+            },
             user: {
               select: {
                 id: true,
@@ -453,7 +522,8 @@ export class OrderController {
   ) {
     try {
       const { orderNumber } = req.params;
-      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const jwtPayload = (req as any).jwtPayload as JwtPayload | undefined;
+      const { email } = req.query;
 
       const order = await prisma.order.findUnique({
         where: { orderNumber },
@@ -466,9 +536,20 @@ export class OrderController {
         throw new NotFoundError("Order not found");
       }
 
-      // Check if order belongs to user
-      if (order.userId !== jwtPayload.userId) {
-        throw new NotFoundError("Order not found");
+      if (order.userId !== null) {
+        // Owned order — only the owner may view it.
+        if (!jwtPayload || jwtPayload.userId !== order.userId) {
+          throw new NotFoundError("Order not found");
+        }
+      } else {
+        // Guest order — allow lookup by order number. If an email is provided,
+        // require it to match the order's shipping email for a bit more safety.
+        if (
+          email &&
+          (email as string).toLowerCase() !== order.shippingEmail.toLowerCase()
+        ) {
+          throw new NotFoundError("Order not found");
+        }
       }
 
       return ResponseUtil.success(res, order, "Order retrieved successfully");
@@ -522,7 +603,13 @@ export class OrderController {
         prisma.order.findMany({
           where,
           include: {
-            items: true,
+            items: {
+              include: {
+                product: {
+                  include: { brand: true },
+                },
+              },
+            },
             user: {
               select: {
                 id: true,

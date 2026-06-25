@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
 import { authenticate, isAdmin } from "../middleware/auth.middleware";
-import { upload } from "../middleware/upload.middleware";
+import { upload, validateImageBuffer } from "../middleware/upload.middleware";
 
 const router = Router();
 
@@ -27,6 +27,7 @@ router.post(
   authenticate,
   isAdmin,
   upload.single("image"),
+  validateImageBuffer,
   ProductController.uploadImage,
 );
 // Add images by URL (existing behaviour)

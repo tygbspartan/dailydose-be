@@ -81,16 +81,10 @@ export class AuthController {
         },
       });
 
-      // Send verification email
-      try {
-        await EmailService.sendVerificationEmail(
-          user.email,
-          emailVerificationToken
-        );
-      } catch (emailError) {
-        console.error("Failed to send verification email:", emailError);
-        // Don't throw error - user is created, just email failed
-      }
+      // Send verification email (fire-and-forget — DB write is already done)
+      void EmailService.sendVerificationEmail(user.email, emailVerificationToken).catch(
+        (err) => console.error("Failed to send verification email:", err)
+      );
 
       // Generate JWT token (user can login but can't order until verified)
       const token = AuthService.generateToken({
@@ -203,15 +197,10 @@ export class AuthController {
         },
       });
 
-      // Send welcome email
-      try {
-        await EmailService.sendWelcomeEmail(
-          user.email,
-          user.firstName || undefined
-        );
-      } catch (emailError) {
-        console.error("Failed to send welcome email:", emailError);
-      }
+      // Send welcome email (fire-and-forget — verification is already persisted)
+      void EmailService.sendWelcomeEmail(user.email, user.firstName || undefined).catch(
+        (err) => console.error("Failed to send welcome email:", err)
+      );
 
       return ResponseUtil.success(
         res,
@@ -240,12 +229,13 @@ export class AuthController {
         where: { email: email.toLowerCase() },
       });
 
-      if (!user) {
-        throw new NotFoundError("User not found");
-      }
-
-      if (user.isEmailVerified) {
-        throw new BadRequestError("Email is already verified");
+      // Generic response regardless of whether the email exists (prevents user enumeration)
+      if (!user || user.isEmailVerified) {
+        return ResponseUtil.success(
+          res,
+          null,
+          "If your account exists and is unverified, a verification email has been sent"
+        );
       }
 
       // Generate new token
@@ -257,16 +247,15 @@ export class AuthController {
         data: { emailVerificationToken },
       });
 
-      // Send email
-      await EmailService.sendVerificationEmail(
-        user.email,
-        emailVerificationToken
+      // Send email (fire-and-forget — token is already saved to DB)
+      void EmailService.sendVerificationEmail(user.email, emailVerificationToken).catch(
+        (err) => console.error("Failed to resend verification email:", err)
       );
 
       return ResponseUtil.success(
         res,
         null,
-        "Verification email sent successfully"
+        "If your account exists and is unverified, a verification email has been sent"
       );
     } catch (error) {
       next(error);
@@ -308,8 +297,10 @@ export class AuthController {
         },
       });
 
-      // Send email
-      await EmailService.sendPasswordResetEmail(user.email, passwordResetToken);
+      // Send email (fire-and-forget — reset token is already saved to DB)
+      void EmailService.sendPasswordResetEmail(user.email, passwordResetToken).catch(
+        (err) => console.error("Failed to send password reset email:", err)
+      );
 
       return ResponseUtil.success(
         res,

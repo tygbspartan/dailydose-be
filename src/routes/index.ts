@@ -9,7 +9,8 @@ import wishlistRoutes from "./wishlist.routes";
 import orderRoutes from "./order.routes";
 import discountRoutes from "./discount.routes";
 import reviewRoutes from "./review.routes";
-import dashboardRoutes from "./dashboard.routes"
+import dashboardRoutes from "./dashboard.routes";
+import heroRoutes from "./hero.routes";
 
 const router = Router();
 
@@ -34,5 +35,6 @@ router.use("/orders", orderRoutes);
 router.use("/discounts", discountRoutes);
 router.use("/reviews", reviewRoutes);
 router.use("/dashboard", dashboardRoutes);
+router.use("/hero", heroRoutes);
 
 export default router;

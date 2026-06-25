@@ -38,6 +38,32 @@ export const authenticate = (
   }
 };
 
+// Middleware for optional authentication.
+// If a valid token is present, attach req.jwtPayload (same as authenticate).
+// If there's no token or the token is invalid, do NOT throw — just continue
+// without jwtPayload (used for guest-friendly routes like guest checkout).
+export const optionalAuthenticate = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = AuthService.verifyToken(token);
+    (req as any).jwtPayload = decoded;
+  } catch (error) {
+    // Invalid/expired token on an optional route — treat as guest.
+  }
+
+  next();
+};
+
 // Middleware to check if user is admin
 export const isAdmin = (req: Request, res: Response, next: NextFunction) => {
   try {

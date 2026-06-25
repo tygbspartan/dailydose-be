@@ -149,6 +149,125 @@ export class WishlistController {
     }
   }
 
+  // Bulk move multiple wishlist items to cart
+  static async bulkMoveToCart(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { items } = req.body as {
+        items: { wishlistItemId: number; quantity?: number; size?: string }[];
+      };
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const userId = jwtPayload.userId;
+
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new BadRequestError("items array is required and must not be empty");
+      }
+
+      // Fetch all referenced wishlist items in one query
+      const wishlistItemIds = items.map((i) => i.wishlistItemId);
+      const wishlistItems = await prisma.wishlistItem.findMany({
+        where: { id: { in: wishlistItemIds }, userId },
+        include: { product: true },
+      });
+      const wishlistMap = new Map(wishlistItems.map((w) => [w.id, w]));
+
+      // Validate each requested item, collect valid ones and failures
+      const validItems: { wishlistItem: (typeof wishlistItems)[0]; quantity: number; size: string | null }[] = [];
+      const failed: { wishlistItemId: number; reason: string }[] = [];
+
+      for (const reqItem of items) {
+        const quantity = reqItem.quantity ?? 1;
+        const wishlistItem = wishlistMap.get(reqItem.wishlistItemId);
+
+        if (!wishlistItem) {
+          failed.push({ wishlistItemId: reqItem.wishlistItemId, reason: "Wishlist item not found" });
+          continue;
+        }
+
+        // Validate size against product's available sizes
+        const productSizes: string[] | null = wishlistItem.product.sizes
+          ? JSON.parse(wishlistItem.product.sizes)
+          : null;
+
+        if (productSizes && productSizes.length > 0) {
+          if (!reqItem.size) {
+            failed.push({
+              wishlistItemId: reqItem.wishlistItemId,
+              reason: `Size is required. Available: ${productSizes.join(", ")}`,
+            });
+            continue;
+          }
+          if (!productSizes.includes(reqItem.size)) {
+            failed.push({
+              wishlistItemId: reqItem.wishlistItemId,
+              reason: `Invalid size "${reqItem.size}". Available: ${productSizes.join(", ")}`,
+            });
+            continue;
+          }
+        }
+
+        // Check stock
+        if (wishlistItem.product.stockQuantity < quantity) {
+          failed.push({
+            wishlistItemId: reqItem.wishlistItemId,
+            reason: `Insufficient stock (available: ${wishlistItem.product.stockQuantity})`,
+          });
+          continue;
+        }
+
+        validItems.push({ wishlistItem, quantity, size: reqItem.size ?? null });
+      }
+
+      if (validItems.length === 0) {
+        return ResponseUtil.success(
+          res,
+          { moved: [], movedCount: 0, failed, failedCount: failed.length },
+          "No items could be moved to cart"
+        );
+      }
+
+      // Process all valid items in a single transaction
+      const movedCartItems = await prisma.$transaction(async (tx) => {
+        const results = [];
+
+        for (const { wishlistItem, quantity, size } of validItems) {
+          const existingCartItem = await tx.cartItem.findFirst({
+            where: { userId, productId: wishlistItem.productId, size },
+          });
+
+          let cartItem;
+          if (existingCartItem) {
+            cartItem = await tx.cartItem.update({
+              where: { id: existingCartItem.id },
+              data: { quantity: existingCartItem.quantity + quantity },
+            });
+          } else {
+            cartItem = await tx.cartItem.create({
+              data: { userId, productId: wishlistItem.productId, quantity, size },
+            });
+          }
+
+          await tx.wishlistItem.delete({ where: { id: wishlistItem.id } });
+          results.push(cartItem);
+        }
+
+        return results;
+      });
+
+      return ResponseUtil.success(
+        res,
+        {
+          moved: movedCartItems,
+          movedCount: movedCartItems.length,
+          failed,
+          failedCount: failed.length,
+        },
+        `${movedCartItems.length} item(s) moved to cart`
+      );
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // Move item from wishlist to cart
   static async moveToCart(req: Request, res: Response, next: NextFunction) {
     try {
@@ -175,13 +294,12 @@ export class WishlistController {
 
       // Add to cart and remove from wishlist in transaction
       const result = await prisma.$transaction(async (prisma) => {
-        // Check if already in cart
-        const existingCartItem = await prisma.cartItem.findUnique({
+        // Check if already in cart (no size — wishlist move doesn't select a size)
+        const existingCartItem = await prisma.cartItem.findFirst({
           where: {
-            userId_productId: {
-              userId: jwtPayload.userId,
-              productId: wishlistItem.productId,
-            },
+            userId: jwtPayload.userId,
+            productId: wishlistItem.productId,
+            size: null,
           },
         });
 

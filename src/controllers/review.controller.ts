@@ -49,18 +49,21 @@ export class ReviewController {
         throw new NotFoundError("Product not found");
       }
 
-      // Check if user already reviewed this product
+      // Check if user already has an initial review for this product
       const existingReview = await prisma.review.findUnique({
         where: {
-          productId_userId: {
+          productId_userId_reviewType: {
             productId,
             userId: jwtPayload.userId,
+            reviewType: "initial",
           },
-        },
+        } as any,
       });
 
       if (existingReview) {
-        throw new ConflictError("You have already reviewed this product");
+        throw new ConflictError(
+          "You have already reviewed this product. You can add a follow-up review after 30 days.",
+        );
       }
 
       // Check if user has purchased this product (verified purchase)
@@ -68,25 +71,14 @@ export class ReviewController {
         where: {
           userId: jwtPayload.userId,
           status: "delivered",
-          items: {
-            some: {
-              productId,
-            },
-          },
-        },
-        include: {
-          items: {
-            where: {
-              productId,
-            },
-          },
+          items: { some: { productId } },
         },
       });
 
       const isVerifiedPurchase = !!order;
       const orderId = order?.id || null;
 
-      // Create review
+      // Create initial review (auto-approved)
       const review = await prisma.review.create({
         data: {
           productId,
@@ -98,7 +90,8 @@ export class ReviewController {
           images: images ? JSON.stringify(images) : null,
           isVerifiedPurchase,
           isApproved: true,
-        },
+          reviewType: "initial",
+        } as any,
         include: {
           user: {
             select: {
@@ -134,6 +127,84 @@ export class ReviewController {
     }
   }
 
+  // Create a follow-up review on an existing initial review
+  static async createFollowup(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params; // initial review ID
+      const { rating, title, comment, images } = req.body;
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const userId = jwtPayload.userId;
+
+      if (!comment || comment.trim().length === 0) {
+        throw new BadRequestError("Comment is required for a follow-up review");
+      }
+
+      if (rating !== undefined && (rating < 1 || rating > 5)) {
+        throw new BadRequestError("Rating must be between 1 and 5");
+      }
+
+      // Load the initial review
+      const initialReview = await prisma.review.findUnique({
+        where: { id: parseInt(id) },
+        include: { followupReview: true } as any,
+      }) as any;
+
+      if (!initialReview || initialReview.userId !== userId) {
+        throw new NotFoundError("Initial review not found");
+      }
+
+      if (initialReview.reviewType !== "initial") {
+        throw new BadRequestError("You can only follow up on an initial review");
+      }
+
+      if (!initialReview.isApproved) {
+        throw new BadRequestError(
+          "Your initial review must be approved before you can add a follow-up",
+        );
+      }
+
+      if (initialReview.followupReview) {
+        throw new ConflictError(
+          "You have already submitted a follow-up for this review",
+        );
+      }
+
+      // Create follow-up (pending admin approval to prevent spam)
+      const followup = await prisma.review.create({
+        data: {
+          productId: initialReview.productId,
+          userId,
+          orderId: initialReview.orderId,
+          rating: rating ?? initialReview.rating, // keep original rating if not provided
+          title: title ?? null,
+          comment: comment.trim(),
+          images: images ? JSON.stringify(images) : null,
+          isVerifiedPurchase: initialReview.isVerifiedPurchase,
+          isApproved: initialReview.isVerifiedPurchase,
+          reviewType: "followup",
+          parentReviewId: initialReview.id,
+        } as any,
+        include: {
+          user: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+          product: { select: { id: true, name: true } },
+        },
+      });
+
+      return ResponseUtil.success(
+        res,
+        { ...followup, images: followup.images ? JSON.parse(followup.images) : null },
+        initialReview.isVerifiedPurchase
+          ? "Follow-up review submitted successfully."
+          : "Follow-up review submitted. It will appear once reviewed by our team.",
+        201,
+      );
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // Get user's own reviews
   static async getMyReviews(req: Request, res: Response, next: NextFunction) {
     try {
@@ -146,6 +217,13 @@ export class ReviewController {
             select: {
               id: true,
               name: true,
+              slug: true,
+              brand: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
               images: {
                 where: { isPrimary: true },
                 take: 1,
@@ -285,48 +363,53 @@ export class ReviewController {
 
       const jwtPayload = (req as any).jwtPayload as JwtPayload | undefined;
 
-      // Build filter
+      // Only fetch initial reviews — follow-ups are nested inside them
       const where: any = {
         productId: parseInt(productId),
-        isApproved: true, // Only show approved reviews
+        isApproved: true,
+        reviewType: "initial",
       };
 
       if (rating) {
         where.rating = parseInt(rating as string);
       }
 
-      // Get reviews
+      // Get reviews with approved follow-ups nested
       const reviews = await prisma.review.findMany({
         where,
         include: {
           user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-            },
+            select: { id: true, firstName: true, lastName: true },
           },
+          followupReview: {
+            where: { isApproved: true },
+            include: {
+              user: {
+                select: { id: true, firstName: true, lastName: true },
+              },
+            },
+          } as any,
           helpfulVotes: jwtPayload
-            ? {
-                where: {
-                  userId: jwtPayload.userId,
-                },
-              }
+            ? { where: { userId: jwtPayload.userId } }
             : false,
-        },
-        orderBy: {
-          [sortBy as string]: sortOrder,
-        },
-      });
+        } as any,
+        orderBy: { [sortBy as string]: sortOrder },
+      }) as any[];
 
       // Parse images and add hasVoted flag
-      const reviewsWithImages = reviews.map((review) => ({
+      const reviewsWithImages = reviews.map((review: any) => ({
         ...review,
         images: review.images ? JSON.parse(review.images) : null,
-        hasVoted: jwtPayload
-          ? (review.helpfulVotes as any[]).length > 0
-          : false,
-        helpfulVotes: undefined, // Remove from response
+        hasVoted: jwtPayload ? (review.helpfulVotes as any[]).length > 0 : false,
+        helpfulVotes: undefined,
+        followupReview: review.followupReview
+          ? {
+              ...review.followupReview,
+              images: review.followupReview.images
+                ? JSON.parse(review.followupReview.images)
+                : null,
+            }
+          : null,
       }));
 
       // Calculate rating summary

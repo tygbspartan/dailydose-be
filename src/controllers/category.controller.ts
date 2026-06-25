@@ -11,6 +11,7 @@ import {
   CreateCategoryRequest,
   UpdateCategoryRequest,
 } from "../types/product.types";
+import { CacheService, TTL } from "../services/cache.service";
 
 export class CategoryController {
   // Create category (Admin only)
@@ -88,12 +89,8 @@ export class CategoryController {
         },
       });
 
-      return ResponseUtil.success(
-        res,
-        category,
-        "Category created successfully",
-        201
-      );
+      CacheService.invalidatePatternBackground("categories:*");
+      return ResponseUtil.success(res, category, "Category created successfully", 201);
     } catch (error) {
       next(error);
     }
@@ -103,6 +100,10 @@ export class CategoryController {
   static async getAll(req: Request, res: Response, next: NextFunction) {
     try {
       const { level, parentId, isActive } = req.query;
+
+      const cacheKey = `categories:all:${JSON.stringify(req.query)}`;
+      const cached = await CacheService.get(cacheKey);
+      if (cached) return ResponseUtil.success(res, cached, "Categories retrieved successfully");
 
       // Build filter
       const where: any = {};
@@ -141,11 +142,8 @@ export class CategoryController {
         _count: undefined, // Remove internal count object
       }));
 
-      return ResponseUtil.success(
-        res,
-        response,
-        "Categories retrieved successfully"
-      );
+      CacheService.setBackground(cacheKey, response, TTL.CATEGORY);
+      return ResponseUtil.success(res, response, "Categories retrieved successfully");
     } catch (error) {
       next(error);
     }
@@ -154,6 +152,9 @@ export class CategoryController {
   // Get category tree (hierarchical structure) (Public)
   static async getTree(req: Request, res: Response, next: NextFunction) {
     try {
+      const cached = await CacheService.get("categories:tree");
+      if (cached) return ResponseUtil.success(res, cached, "Category tree retrieved successfully");
+
       // Get all Level 1 categories with their children
       const categories = await prisma.category.findMany({
         where: {
@@ -185,11 +186,8 @@ export class CategoryController {
         orderBy: { displayOrder: "asc" },
       });
 
-      return ResponseUtil.success(
-        res,
-        categories,
-        "Category tree retrieved successfully"
-      );
+      CacheService.setBackground("categories:tree", categories, TTL.CATEGORY);
+      return ResponseUtil.success(res, categories, "Category tree retrieved successfully");
     } catch (error) {
       next(error);
     }
@@ -199,6 +197,10 @@ export class CategoryController {
   static async getBySlug(req: Request, res: Response, next: NextFunction) {
     try {
       const { slug } = req.params;
+
+      const cacheKey = `categories:slug:${slug}`;
+      const cached = await CacheService.get(cacheKey);
+      if (cached) return ResponseUtil.success(res, cached, "Category retrieved successfully");
 
       const category = await prisma.category.findUnique({
         where: { slug },
@@ -218,14 +220,9 @@ export class CategoryController {
         throw new NotFoundError("Category not found");
       }
 
-      return ResponseUtil.success(
-        res,
-        {
-          ...category,
-          productCount: category._count.products,
-        },
-        "Category retrieved successfully"
-      );
+      const response = { ...category, productCount: category._count.products };
+      CacheService.setBackground(cacheKey, response, TTL.CATEGORY);
+      return ResponseUtil.success(res, response, "Category retrieved successfully");
     } catch (error) {
       next(error);
     }
@@ -314,11 +311,8 @@ export class CategoryController {
         },
       });
 
-      return ResponseUtil.success(
-        res,
-        category,
-        "Category updated successfully"
-      );
+      CacheService.invalidatePatternBackground("categories:*");
+      return ResponseUtil.success(res, category, "Category updated successfully");
     } catch (error) {
       next(error);
     }
@@ -363,6 +357,7 @@ export class CategoryController {
         where: { id: parseInt(id) },
       });
 
+      CacheService.invalidatePatternBackground("categories:*");
       return ResponseUtil.success(res, null, "Category deleted successfully");
     } catch (error) {
       next(error);

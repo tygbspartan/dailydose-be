@@ -1,5 +1,6 @@
 import express, { Application } from "express";
 import cors from "cors";
+import helmet from "helmet";
 import passport from "./config/passport.config";
 import { requestLogger } from "./middleware/logger.middleware";
 import {
@@ -11,6 +12,9 @@ import { config } from "./config/env.config";
 
 const app: Application = express();
 
+// Security headers — CSP and COEP disabled to avoid breaking OAuth redirects and API clients
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+
 // Middleware
 app.use(
   cors({
@@ -18,8 +22,8 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "500kb" }));
+app.use(express.urlencoded({ extended: true, limit: "500kb" }));
 app.use(requestLogger);
 
 // Initialize Passport

@@ -41,6 +41,9 @@ interface EnvConfig {
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
   supabaseStorageBucket: string;
+
+  // Redis (optional)
+  redisUrl: string | null;
 }
 
 const getEnvVariable = (key: string, defaultValue?: string): string => {
@@ -90,6 +93,9 @@ export const config: EnvConfig = {
   supabaseUrl: getEnvVariable('SUPABASE_URL'),
   supabaseServiceRoleKey: getEnvVariable('SUPABASE_SERVICE_ROLE_KEY'),
   supabaseStorageBucket: getEnvVariable('SUPABASE_STORAGE_BUCKET', 'images'),
+
+  // Redis (optional — caching disabled if not set)
+  redisUrl: process.env['REDIS_URL'] || null,
 };
 
 // Validate critical env variables on startup

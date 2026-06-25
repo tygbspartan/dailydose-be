@@ -1,6 +1,7 @@
 export interface AddToCartRequest {
   productId: number;
   quantity?: number;
+  size?: string; // Required if product has sizes defined
 }
 
 export interface UpdateCartItemRequest {
@@ -12,6 +13,7 @@ export interface CartItemResponse {
   userId: number;
   productId: number;
   quantity: number;
+  size: string | null;
   createdAt: Date;
   updatedAt: Date;
   product: {

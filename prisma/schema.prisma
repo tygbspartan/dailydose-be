@@ -40,6 +40,22 @@ model User {
   @@map("users")
 }
 
+// ==================== HERO IMAGES ====================
+
+model HeroImage {
+  id           Int     @id @default(autoincrement())
+  imageUrl     String  @map("image_url")
+  altText      String? @map("alt_text")
+  linkUrl      String? @map("link_url") // optional CTA link (e.g. /products?category=skincare)
+  displayOrder Int     @default(0) @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("hero_images")
+}
+
 // ==================== CATEGORIES (3-LEVEL HIERARCHY) ====================
 
 model Category {
@@ -114,23 +130,17 @@ model Product {
   costPrice     Decimal? @map("cost_price") @db.Decimal(10, 2) // Your cost (hidden)
 
   // Description
-  shortDescription String? @map("short_description") @db.Text // Quick overview
-  longDescription  String? @map("long_description") @db.Text // Full description
+  longDescription String? @map("long_description") @db.Text
 
   // Product Details
-  volume          String? // "1 sheet"
-  weight          Decimal? @db.Decimal(10, 2) // For shipping later
-  countryOfOrigin String?  @map("country_of_origin") // "Korea"
+  countryOfOrigin String? @map("country_of_origin")
 
-  // Marketing Content (Your product fields)
-  effectiveFor   String? @map("effective_for") @db.Text // Store as JSON or newline-separated
-  features       String? @db.Text // Store as JSON or newline-separated
-  certifications String? @db.Text // Store as JSON or newline-separated
+  // Sizes (e.g., ["S", "M", "L", "XL"] or ["250ml", "500ml"])
+  sizes String? @db.Text // JSON array; null means no size selection required
 
-  // Usage Information
-  howToUse    String? @map("how_to_use") @db.Text
-  ingredients String? @db.Text
-  cautions    String? @db.Text
+  // Skin attributes (JSON arrays of allowed enum values)
+  skinType    String? @db.Text @map("skin_type")    // e.g. ["Normal","Dry"]
+  skinConcern String? @db.Text @map("skin_concern") // e.g. ["Acne & Breakouts","Dullness & Brightening"]
 
   // Stock Management
   stockQuantity     Int @default(0) @map("stock_quantity")
@@ -141,8 +151,9 @@ model Product {
   metaDescription String? @map("meta_description")
 
   // Status & Features
-  isActive   Boolean @default(true) @map("is_active")
-  isFeatured Boolean @default(false) @map("is_featured")
+  isActive        Boolean @default(true) @map("is_active")
+  isFeatured      Boolean @default(false) @map("is_featured")
+  homepageFeature Boolean @default(false) @map("homepage_feature")
 
   // Badges (e.g., ["New", "Best Seller"])
   badges String? @db.Text // Store as JSON array
@@ -242,13 +253,13 @@ model CartItem {
   userId    Int      @map("user_id")
   productId Int      @map("product_id")
   quantity  Int      @default(1)
+  size      String?  // Selected size (null if product has no sizes)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, productId])
   @@map("cart_items")
 }
 
@@ -270,7 +281,7 @@ model WishlistItem {
 model Order {
   id          Int    @id @default(autoincrement())
   orderNumber String @unique @map("order_number") // e.g., "ORD-2026-001"
-  userId      Int    @map("user_id")
+  userId      Int?   @map("user_id") // nullable: guest checkout has no user
 
   // Order Status
   status String @default("pending") // pending, confirmed, processing, shipped, delivered, cancelled
@@ -312,7 +323,7 @@ model Order {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  user            User        @relation(fields: [userId], references: [id])
+  user            User?       @relation(fields: [userId], references: [id])
   items           OrderItem[]
   appliedDiscount Discount?   @relation(fields: [discountId], references: [id], onDelete: SetNull) //
   reviews         Review[]
@@ -329,6 +340,7 @@ model OrderItem {
   productName  String  @map("product_name")
   productSku   String? @map("product_sku")
   productImage String? @map("product_image") // Primary image URL
+  productSize  String? @map("product_size")  // Selected size at time of order
 
   // Pricing
   price    Decimal @db.Decimal(10, 2) // Price at time of order
@@ -360,6 +372,10 @@ model Review {
   // Images (optional - customers can upload review photos)
   images String? @db.Text // JSON array of image URLs
 
+  // Review type
+  reviewType     String  @default("initial") @map("review_type") // "initial" or "followup"
+  parentReviewId Int?    @unique @map("parent_review_id")
+
   // Moderation
   isVerifiedPurchase Boolean @default(false) @map("is_verified_purchase")
   isApproved         Boolean @default(false) @map("is_approved") // Admin moderation
@@ -372,12 +388,14 @@ model Review {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  product      Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
-  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  order        Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  helpfulVotes ReviewHelpful[]
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order          Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  helpfulVotes   ReviewHelpful[]
+  parentReview   Review?         @relation("ReviewFollowup", fields: [parentReviewId], references: [id], onDelete: SetNull)
+  followupReview Review?         @relation("ReviewFollowup")
 
-  @@unique([productId, userId]) // One review per user per product
+  @@unique([productId, userId, reviewType]) // 1 initial + 1 followup per user per product
   @@map("reviews")
 }
 

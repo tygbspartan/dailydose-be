@@ -14,6 +14,9 @@ router.get("/product/:productId", ReviewController.getProductReviews);
 // Create review
 router.post("/", authenticate, ReviewController.create);
 
+// Add follow-up to an existing initial review (30-day gap enforced, needs admin approval)
+router.post("/:id/followup", authenticate, ReviewController.createFollowup);
+
 // Get own reviews
 router.get("/my-reviews", authenticate, ReviewController.getMyReviews);
 

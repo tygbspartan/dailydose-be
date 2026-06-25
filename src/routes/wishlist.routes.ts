@@ -7,6 +7,7 @@ const router = Router();
 // All wishlist routes require authentication
 router.post("/", authenticate, WishlistController.addToWishlist);
 router.get("/", authenticate, WishlistController.getWishlist);
+router.post("/move-to-cart", authenticate, WishlistController.bulkMoveToCart);  // bulk — must be before /:id
 router.delete("/:id", authenticate, WishlistController.removeFromWishlist);
 router.post("/:id/move-to-cart", authenticate, WishlistController.moveToCart);
 router.delete("/", authenticate, WishlistController.clearWishlist);

@@ -13,7 +13,7 @@ export class CartController {
   // Add item to cart
   static async addToCart(req: Request, res: Response, next: NextFunction) {
     try {
-      const { productId, quantity = 1 }: AddToCartRequest = req.body;
+      const { productId, quantity = 1, size }: AddToCartRequest = req.body;
       const jwtPayload = (req as any).jwtPayload as JwtPayload;
 
       // Validation
@@ -34,6 +34,26 @@ export class CartController {
         throw new NotFoundError("Product not found or unavailable");
       }
 
+      // Validate size if product has sizes defined
+      const productSizes: string[] | null = product.sizes
+        ? JSON.parse(product.sizes as string)
+        : null;
+
+      if (productSizes && productSizes.length > 0) {
+        if (!size) {
+          throw new BadRequestError(
+            `Please select a size. Available: ${productSizes.join(", ")}`
+          );
+        }
+        if (!productSizes.includes(size)) {
+          throw new BadRequestError(
+            `Invalid size "${size}". Available: ${productSizes.join(", ")}`
+          );
+        }
+      }
+
+      const selectedSize = productSizes && productSizes.length > 0 ? size! : null;
+
       // Check if product is in stock
       if (product.stockQuantity < quantity) {
         throw new BadRequestError(
@@ -41,13 +61,12 @@ export class CartController {
         );
       }
 
-      // Check if item already in cart
-      const existingCartItem = await prisma.cartItem.findUnique({
+      // Find existing cart item for this product + size combination
+      const existingCartItem = await prisma.cartItem.findFirst({
         where: {
-          userId_productId: {
-            userId: jwtPayload.userId,
-            productId: productId,
-          },
+          userId: jwtPayload.userId,
+          productId: productId,
+          size: selectedSize,
         },
       });
 
@@ -84,6 +103,7 @@ export class CartController {
             userId: jwtPayload.userId,
             productId: productId,
             quantity: quantity,
+            size: selectedSize,
           },
           include: {
             product: {
@@ -123,6 +143,7 @@ export class CartController {
                 where: { isPrimary: true },
                 take: 1,
               },
+              brand: true,
             },
           },
         },

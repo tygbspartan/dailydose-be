@@ -74,24 +74,22 @@ export interface BrandResponse {
 
 export interface CreateProductRequest {
   name: string;
-  shortDescription?: string;
-  longDescription?: string;
+  longDescription: string;
   price: number;
   originalPrice?: number;
-  costPrice?: number;
+  costPrice: number;
   stockQuantity: number;
   lowStockThreshold?: number;
-  sku?: string;
-  brandId?: number;
-  categoryId?: number;
+  sku: string;
+  brandId: number;
+  categoryId: number;
+  countryOfOrigin?: string;
   isActive?: boolean;
   isFeatured?: boolean;
-  effectiveFor?: string[];
-  features?: string[];
-  certifications?: string[];
-  howToUse?: string[];
-  ingredients?: string[];
-  cautions?: string[];
+  homepageFeature?: boolean;
+  sizes?: string[];
+  skinType?: string[];
+  skinConcern?: string[];
   metaTitle?: string;
   metaDescription?: string;
   images?: {
@@ -108,7 +106,6 @@ export interface CreateProductRequest {
 
 export interface UpdateProductRequest {
   name?: string;
-  shortDescription?: string;
   longDescription?: string;
   price?: number;
   originalPrice?: number;
@@ -118,14 +115,13 @@ export interface UpdateProductRequest {
   sku?: string;
   brandId?: number;
   categoryId?: number;
+  countryOfOrigin?: string;
   isActive?: boolean;
   isFeatured?: boolean;
-  effectiveFor?: string[];
-  features?: string[];
-  certifications?: string[];
-  howToUse?: string[];
-  ingredients?: string[];
-  cautions?: string[];
+  homepageFeature?: boolean;
+  sizes?: string[];
+  skinType?: string[];
+  skinConcern?: string[];
   metaTitle?: string;
   metaDescription?: string;
   images?: {
@@ -165,19 +161,9 @@ export interface ProductResponse {
   originalPrice: number | null;
   costPrice?: number | null; // Hidden from customers
 
-  shortDescription: string | null;
   longDescription: string | null;
-
-  volume: string | null;
-  weight: number | null;
   countryOfOrigin: string | null;
-
-  effectiveFor: string[] | null;
-  features: string[] | null;
-  certifications: string[] | null;
-  howToUse: string | null;
-  ingredients: string | null;
-  cautions: string | null;
+  sizes: string[] | null;
 
   stockQuantity: number;
   lowStockThreshold: number;
@@ -185,7 +171,10 @@ export interface ProductResponse {
 
   isActive: boolean;
   isFeatured: boolean;
+  homepageFeature: boolean;
   badges: string[] | null;
+  skinType: string[] | null;
+  skinConcern: string[] | null;
 
   discountPercentage?: number; // Calculated field
 
@@ -224,6 +213,7 @@ export interface ProductQueryParams {
   maxPrice?: number;
   inStock?: boolean;
   isFeatured?: boolean;
+  homepageFeature?: boolean;
   sortBy?: "name" | "price" | "createdAt" | "popularity";
   sortOrder?: "asc" | "desc";
 }

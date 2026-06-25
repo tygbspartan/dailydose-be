@@ -15,23 +15,43 @@ import {
   UpdateProductRequest,
 } from "../types/product.types";
 import { StorageService } from "../services/storage.service";
+import { CacheService, TTL } from "../services/cache.service";
 
 // Helper function to parse JSON fields
 const parseProductArrays = (product: any) => {
-  return {
-    ...product,
-    // effectiveFor: product.effectiveFor
-    //   ? JSON.parse(product.effectiveFor)
-    //   : null,
-    // // features: product.features ? JSON.parse(product.features) : null,
-    // certifications: product.certifications
-    //   ? JSON.parse(product.certifications)
-    //   : null,
-    // howToUse: product.howToUse ? JSON.parse(product.howToUse) : null,
-    // ingredients: product.ingredients ? JSON.parse(product.ingredients) : null,
-    // cautions: product.cautions ? JSON.parse(product.cautions) : null,
-  };
+  return { ...product };
 };
+
+const ALLOWED_SKIN_TYPES = ["Normal", "Dry", "Oily", "Combination", "Sensitive"] as const;
+
+const ALLOWED_SKIN_CONCERNS = [
+  "Acne & Breakouts",
+  "Oil Control",
+  "Large Pores",
+  "Dryness",
+  "Dehydration",
+  "Sensitivity & Redness",
+  "Dark Spots & Hyperpigmentation",
+  "Uneven Skin Tone",
+  "Dullness & Brightening",
+  "Uneven Texture",
+  "Fine Lines & Wrinkles",
+  "Firmness & Elasticity",
+  "Dark Circles",
+  "Puffiness",
+  "Sun Protection",
+] as const;
+
+function validateSkinValues(
+  values: string[],
+  allowed: readonly string[],
+  fieldName: string,
+): void {
+  const invalid = values.filter((v) => !allowed.includes(v as any));
+  if (invalid.length > 0) {
+    throw new Error(`Invalid ${fieldName} value(s): ${invalid.join(", ")}`);
+  }
+}
 
 export class ProductController {
   // Create product (Admin)
@@ -39,7 +59,6 @@ export class ProductController {
     try {
       const {
         name,
-        shortDescription,
         longDescription,
         price,
         originalPrice,
@@ -49,14 +68,13 @@ export class ProductController {
         sku,
         brandId,
         categoryId,
+        countryOfOrigin,
         isActive,
         isFeatured,
-        effectiveFor,
-        features,
-        certifications,
-        howToUse,
-        ingredients,
-        cautions,
+        homepageFeature,
+        sizes,
+        skinType,
+        skinConcern,
         images,
         specifications,
         metaTitle,
@@ -64,10 +82,14 @@ export class ProductController {
       }: CreateProductRequest = req.body;
 
       // Validation
-      if (!name || !price || stockQuantity === undefined) {
+      if (!name || !price || stockQuantity === undefined || !longDescription || !sku || !brandId || !categoryId) {
         throw new BadRequestError(
-          "Name, price, and stock quantity are required",
+          "Name, price, stock quantity, description, SKU, brand, and category are required",
         );
+      }
+
+      if (costPrice === undefined || costPrice === null) {
+        throw new BadRequestError("Cost price is required");
       }
 
       if (price <= 0) {
@@ -77,6 +99,9 @@ export class ProductController {
       if (stockQuantity < 0) {
         throw new BadRequestError("Stock quantity cannot be negative");
       }
+
+      if (skinType?.length) validateSkinValues(skinType, ALLOWED_SKIN_TYPES, "skinType");
+      if (skinConcern?.length) validateSkinValues(skinConcern, ALLOWED_SKIN_CONCERNS, "skinConcern");
 
       // Check if SKU already exists (if provided)
       if (sku) {
@@ -111,7 +136,6 @@ export class ProductController {
             data: {
               name,
               slug: uniqueSlug,
-              shortDescription,
               longDescription,
               price,
               originalPrice,
@@ -119,22 +143,18 @@ export class ProductController {
               stockQuantity,
               lowStockThreshold: lowStockThreshold || 10,
               sku,
-              brandId,
-              categoryId,
+              brand: brandId ? { connect: { id: brandId } } : undefined,
+              category: categoryId ? { connect: { id: categoryId } } : undefined,
+              countryOfOrigin,
               metaTitle,
               metaDescription,
               isActive: isActive ?? true,
               isFeatured: isFeatured ?? false,
-              // Convert arrays to JSON strings
-              effectiveFor: effectiveFor ? JSON.stringify(effectiveFor) : null,
-              features: features ? JSON.stringify(features) : null,
-              certifications: certifications
-                ? JSON.stringify(certifications)
-                : null,
-              howToUse: howToUse ? JSON.stringify(howToUse) : null,
-              ingredients: ingredients ? JSON.stringify(ingredients) : null,
-              cautions: cautions ? JSON.stringify(cautions) : null,
-            },
+              homepageFeature: homepageFeature ?? false,
+              sizes: sizes?.length ? JSON.stringify(sizes) : null,
+              skinType: skinType?.length ? JSON.stringify(skinType) : null,
+              skinConcern: skinConcern?.length ? JSON.stringify(skinConcern) : null,
+            } as any,
           });
 
           // 2. Create product images
@@ -185,6 +205,7 @@ export class ProductController {
           },
         });
 
+        CacheService.invalidatePatternBackground("products:*");
         return ResponseUtil.success(
           res,
           productWithRelations,
@@ -199,7 +220,6 @@ export class ProductController {
             data: {
               name,
               slug,
-              shortDescription,
               longDescription,
               price,
               originalPrice,
@@ -207,22 +227,18 @@ export class ProductController {
               stockQuantity,
               lowStockThreshold: lowStockThreshold || 10,
               sku,
-              brandId,
-              categoryId,
+              brand: brandId ? { connect: { id: brandId } } : undefined,
+              category: categoryId ? { connect: { id: categoryId } } : undefined,
+              countryOfOrigin,
               isActive: isActive ?? true,
               isFeatured: isFeatured ?? false,
+              homepageFeature: homepageFeature ?? false,
               metaDescription,
               metaTitle,
-              // Convert arrays to JSON strings
-              effectiveFor: effectiveFor ? JSON.stringify(effectiveFor) : null,
-              features: features ? JSON.stringify(features) : null,
-              certifications: certifications
-                ? JSON.stringify(certifications)
-                : null,
-              howToUse: howToUse ? JSON.stringify(howToUse) : null,
-              ingredients: ingredients ? JSON.stringify(ingredients) : null,
-              cautions: cautions ? JSON.stringify(cautions) : null,
-            },
+              sizes: sizes?.length ? JSON.stringify(sizes) : null,
+              skinType: skinType?.length ? JSON.stringify(skinType) : null,
+              skinConcern: skinConcern?.length ? JSON.stringify(skinConcern) : null,
+            } as any,
           });
 
           // 2. Create product images
@@ -273,6 +289,7 @@ export class ProductController {
           },
         });
 
+        await CacheService.invalidatePattern("products:*");
         return ResponseUtil.success(
           res,
           parseProductArrays(productWithRelations),
@@ -309,7 +326,6 @@ export class ProductController {
       // Extract fields from updateData
       const {
         name,
-        shortDescription,
         longDescription,
         price,
         originalPrice,
@@ -319,19 +335,21 @@ export class ProductController {
         sku,
         brandId,
         categoryId,
+        countryOfOrigin,
         isActive,
         isFeatured,
-        effectiveFor,
-        features,
-        certifications,
-        howToUse,
-        ingredients,
-        cautions,
+        homepageFeature,
+        sizes,
+        skinType,
+        skinConcern,
         images,
         specifications,
         metaTitle,
         metaDescription,
       } = updateData;
+
+      if (skinType?.length) validateSkinValues(skinType, ALLOWED_SKIN_TYPES, "skinType");
+      if (skinConcern?.length) validateSkinValues(skinConcern, ALLOWED_SKIN_CONCERNS, "skinConcern");
 
       // Check if SKU is being changed and if it's already in use
       if (sku && sku !== existingProduct.sku) {
@@ -373,7 +391,6 @@ export class ProductController {
           data: {
             name,
             slug,
-            shortDescription,
             longDescription,
             price,
             originalPrice,
@@ -381,60 +398,28 @@ export class ProductController {
             stockQuantity,
             lowStockThreshold,
             sku,
-            brandId,
-            categoryId,
+            brand: brandId !== undefined
+              ? (brandId ? { connect: { id: brandId } } : { disconnect: true })
+              : undefined,
+            category: categoryId !== undefined
+              ? (categoryId ? { connect: { id: categoryId } } : { disconnect: true })
+              : undefined,
+            countryOfOrigin,
             isActive,
             isFeatured,
+            homepageFeature,
             metaTitle,
             metaDescription,
-            // Convert arrays to JSON strings
-            effectiveFor:
-              effectiveFor !== undefined
-                ? effectiveFor
-                  ? JSON.stringify(effectiveFor)
-                  : null
-                : undefined,
-            features:
-              features !== undefined
-                ? features
-                  ? JSON.stringify(features)
-                  : null
-                : undefined,
-            certifications:
-              certifications !== undefined
-                ? certifications
-                  ? JSON.stringify(certifications)
-                  : null
-                : undefined,
-            howToUse:
-              howToUse !== undefined
-                ? howToUse
-                  ? JSON.stringify(howToUse)
-                  : null
-                : undefined,
-            ingredients:
-              ingredients !== undefined
-                ? ingredients
-                  ? JSON.stringify(ingredients)
-                  : null
-                : undefined,
-            cautions:
-              cautions !== undefined
-                ? cautions
-                  ? JSON.stringify(cautions)
-                  : null
-                : undefined,
-          },
+            sizes: sizes !== undefined ? (sizes?.length ? JSON.stringify(sizes) : null) : undefined,
+            skinType: skinType !== undefined ? (skinType?.length ? JSON.stringify(skinType) : null) : undefined,
+            skinConcern: skinConcern !== undefined ? (skinConcern?.length ? JSON.stringify(skinConcern) : null) : undefined,
+          } as any,
         });
 
         // 2. Update images if provided
         if (images !== undefined) {
-          // Delete existing images
-          await tx.productImage.deleteMany({
-            where: { productId },
-          });
+          await tx.productImage.deleteMany({ where: { productId } });
 
-          // Create new images
           if (images && images.length > 0) {
             await Promise.all(
               images.map((image) =>
@@ -454,21 +439,13 @@ export class ProductController {
 
         // 3. Update specifications if provided
         if (specifications !== undefined) {
-          // Delete existing specifications
-          await tx.productSpecification.deleteMany({
-            where: { productId },
-          });
+          await tx.productSpecification.deleteMany({ where: { productId } });
 
-          // Create new specifications
           if (specifications && specifications.length > 0) {
             await Promise.all(
               specifications.map((spec) =>
                 tx.productSpecification.create({
-                  data: {
-                    productId,
-                    key: spec.key,
-                    value: spec.value,
-                  },
+                  data: { productId, key: spec.key, value: spec.value },
                 }),
               ),
             );
@@ -478,24 +455,46 @@ export class ProductController {
         return updatedProduct;
       });
 
-      // Fetch updated product with relations
-      const productWithRelations = await prisma.product.findUnique({
-        where: { id: product.id },
-        include: {
-          brand: true,
-          category: true,
-          images: {
-            orderBy: { displayOrder: "asc" },
-          },
-          specifications: true,
-        },
-      });
+      // Delete orphaned Supabase Storage files for images that were removed
+      if (images !== undefined) {
+        const newUrls = new Set((images || []).map((img) => img.imageUrl));
+        const toDelete = existingProduct.images
+          .filter((img) => !newUrls.has(img.imageUrl))
+          .map((img) => img.imageUrl);
 
-      return ResponseUtil.success(
-        res,
-        parseProductArrays(productWithRelations),
-        "Product updated successfully",
+        if (toDelete.length > 0) {
+          void StorageService.deleteImages(toDelete).catch((err) =>
+            console.error("Failed to delete old product images from storage:", err),
+          );
+        }
+      }
+
+      // Fetch updated product with parallel queries (same pattern as getBySlug)
+      const [updatedProduct, allCategories, updatedImages, updatedSpecs] =
+        await Promise.all([
+          prisma.product.findUnique({ where: { id: product.id }, include: { brand: true } }),
+          prisma.category.findMany({
+            select: { id: true, name: true, slug: true, parentId: true, level: true, description: true, isActive: true },
+          }),
+          prisma.productImage.findMany({
+            where: { productId: product.id },
+            orderBy: { displayOrder: "asc" },
+          }),
+          prisma.productSpecification.findMany({
+            where: { productId: product.id },
+          }),
+        ]);
+
+      const catMap = new Map(allCategories.map((c) => [c.id, c]));
+      const category = ProductController.buildCategoryWithParents(
+        updatedProduct!.categoryId,
+        catMap,
       );
+      const fullProduct = { ...updatedProduct, category, images: updatedImages, specifications: updatedSpecs };
+      const response = ProductController.transformProductResponse(fullProduct, true);
+
+      CacheService.invalidatePatternBackground("products:*");
+      return ResponseUtil.success(res, response, "Product updated successfully");
     } catch (error) {
       next(error);
     }
@@ -560,9 +559,15 @@ export class ProductController {
         maxPrice,
         inStock,
         isFeatured,
+        skinType,
+        skinConcern,
         sortBy = "createdAt",
         sortOrder = "desc",
       } = req.query;
+
+      const cacheKey = `products:list:${JSON.stringify(req.query)}`;
+      const cached = await CacheService.get(cacheKey);
+      if (cached) return ResponseUtil.success(res, cached, "Products retrieved successfully");
 
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
@@ -576,12 +581,7 @@ export class ProductController {
       if (search) {
         where.OR = [
           { name: { contains: search as string, mode: "insensitive" } },
-          {
-            shortDescription: {
-              contains: search as string,
-              mode: "insensitive",
-            },
-          },
+          { longDescription: { contains: search as string, mode: "insensitive" } },
         ];
       }
 
@@ -639,6 +639,40 @@ export class ProductController {
         where.isFeatured = true;
       }
 
+      if (req.query.homepageFeature === "true") {
+        where.homepageFeature = true;
+      }
+
+      // Filter by skin type / skin concern.
+      // These are stored as JSON strings in TEXT columns (e.g. ["Oily"]),
+      // so we match on the quoted value to avoid partial hits (e.g. "Dry" vs "Dryness").
+      // Accepts a single value, comma-separated values, or repeated params;
+      // multiple values within a field are OR-ed (product matches any).
+      const parseMulti = (val: unknown): string[] =>
+        (Array.isArray(val) ? val : typeof val === "string" ? val.split(",") : [])
+          .map((v) => String(v).trim())
+          .filter(Boolean);
+
+      const skinTypeValues = parseMulti(skinType);
+      if (skinTypeValues.length > 0) {
+        where.AND = where.AND || [];
+        where.AND.push({
+          OR: skinTypeValues.map((v) => ({
+            skinType: { contains: `"${v}"`, mode: "insensitive" },
+          })),
+        });
+      }
+
+      const skinConcernValues = parseMulti(skinConcern);
+      if (skinConcernValues.length > 0) {
+        where.AND = where.AND || [];
+        where.AND.push({
+          OR: skinConcernValues.map((v) => ({
+            skinConcern: { contains: `"${v}"`, mode: "insensitive" },
+          })),
+        });
+      }
+
       // Build orderBy
       const orderBy: any = {};
       orderBy[sortBy as string] = sortOrder;
@@ -670,19 +704,17 @@ export class ProductController {
       // Parse JSON arrays for each product
       const parsedProducts = transformedProducts.map(parseProductArrays);
 
-      return ResponseUtil.success(
-        res,
-        {
-          data: parsedProducts,
-          pagination: {
-            page: pageNum,
-            limit: limitNum,
-            total,
-            totalPages: Math.ceil(total / limitNum),
-          },
+      const result = {
+        data: parsedProducts,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum),
         },
-        "Products retrieved successfully",
-      );
+      };
+      CacheService.setBackground(cacheKey, result, TTL.PRODUCT_LIST);
+      return ResponseUtil.success(res, result, "Products retrieved successfully");
     } catch (error) {
       next(error);
     }
@@ -692,6 +724,12 @@ export class ProductController {
   static getDiscountedProducts = async (req: Request, res: Response) => {
     try {
       const { limit = 10 } = req.query;
+
+      const cacheKey = `products:discounted:${limit}`;
+      const cached = await CacheService.get(cacheKey);
+      if (cached) {
+        return res.status(200).json({ status: "success", data: { data: cached } });
+      }
 
       const products = await prisma.product.findMany({
         where: {
@@ -725,6 +763,7 @@ export class ProductController {
         (product) => ProductController.transformProductResponse(product, false), // false = don't include costPrice
       );
 
+      CacheService.setBackground(cacheKey, transformedProducts, TTL.PRODUCT_LIST);
       res.status(200).json({
         status: "success",
         data: { data: transformedProducts },
@@ -743,30 +782,43 @@ export class ProductController {
     }
   };
 
+  // Resolve a category with its parent chain using a pre-fetched category map
+  private static buildCategoryWithParents(
+    categoryId: number | null,
+    catMap: Map<number, any>,
+  ): any {
+    if (!categoryId) return null;
+    const cat = catMap.get(categoryId);
+    if (!cat) return null;
+    return {
+      ...cat,
+      parent: cat.parentId ? ProductController.buildCategoryWithParents(cat.parentId, catMap) : null,
+    };
+  }
+
   // Get single product by slug (Public)
   static async getBySlug(req: Request, res: Response, next: NextFunction) {
     try {
       const { slug } = req.params;
 
-      const product = await prisma.product.findUnique({
-        where: { slug },
-        include: {
-          brand: true,
-          category: {
-            include: {
-              parent: {
-                include: {
-                  parent: true,
-                },
-              },
-            },
-          },
-          images: {
-            orderBy: { displayOrder: "asc" },
-          },
-          specifications: true,
-        },
-      });
+      const cacheKey = `products:slug:${slug}`;
+      const cached = await CacheService.get(cacheKey);
+      if (cached) return ResponseUtil.success(res, cached, "Product retrieved successfully");
+
+      // Run all 4 queries in parallel — cuts 6 sequential RTTs down to 1 parallel group
+      const [product, allCategories, images, specifications] = await Promise.all([
+        prisma.product.findUnique({ where: { slug }, include: { brand: true } }),
+        prisma.category.findMany({
+          select: { id: true, name: true, slug: true, parentId: true, level: true, description: true, isActive: true },
+        }),
+        prisma.productImage.findMany({
+          where: { product: { slug } },
+          orderBy: { displayOrder: "asc" },
+        }),
+        prisma.productSpecification.findMany({
+          where: { product: { slug } },
+        }),
+      ]);
 
       if (!product) {
         throw new NotFoundError("Product not found");
@@ -776,17 +828,14 @@ export class ProductController {
         throw new NotFoundError("Product not available");
       }
 
-      // Transform response (hide costPrice from public)
-      const response = ProductController.transformProductResponse(
-        product,
-        false,
-      );
+      const catMap = new Map(allCategories.map((c) => [c.id, c]));
+      const category = ProductController.buildCategoryWithParents(product.categoryId, catMap);
 
-      return ResponseUtil.success(
-        res,
-        response,
-        "Product retrieved successfully",
-      );
+      const fullProduct = { ...product, category, images, specifications };
+      const response = ProductController.transformProductResponse(fullProduct, false);
+
+      CacheService.setBackground(cacheKey, response, TTL.PRODUCT_SLUG);
+      return ResponseUtil.success(res, response, "Product retrieved successfully");
     } catch (error) {
       next(error);
     }
@@ -796,36 +845,32 @@ export class ProductController {
   static async getById(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+      const productId = parseInt(id);
 
-      const product = await prisma.product.findUnique({
-        where: { id: parseInt(id) },
-        include: {
-          brand: true,
-          category: {
-            include: {
-              parent: {
-                include: {
-                  parent: true,
-                },
-              },
-            },
-          },
-          images: {
-            orderBy: { displayOrder: "asc" },
-          },
-          specifications: true,
-        },
-      });
+      // Run all 4 queries in parallel
+      const [product, allCategories, images, specifications] = await Promise.all([
+        prisma.product.findUnique({ where: { id: productId }, include: { brand: true } }),
+        prisma.category.findMany({
+          select: { id: true, name: true, slug: true, parentId: true, level: true, description: true, isActive: true },
+        }),
+        prisma.productImage.findMany({
+          where: { productId },
+          orderBy: { displayOrder: "asc" },
+        }),
+        prisma.productSpecification.findMany({
+          where: { productId },
+        }),
+      ]);
 
       if (!product) {
         throw new NotFoundError("Product not found");
       }
 
-      // Transform response (include costPrice for admin)
-      const response = ProductController.transformProductResponse(
-        product,
-        true,
-      );
+      const catMap = new Map(allCategories.map((c) => [c.id, c]));
+      const category = ProductController.buildCategoryWithParents(product.categoryId, catMap);
+
+      const fullProduct = { ...product, category, images, specifications };
+      const response = ProductController.transformProductResponse(fullProduct, true);
 
       return ResponseUtil.success(
         res,
@@ -978,6 +1023,7 @@ export class ProductController {
       // Delete product — cascade removes ProductImage rows from DB
       await prisma.product.delete({ where: { id: productId } });
 
+      CacheService.invalidatePatternBackground("products:*");
       return ResponseUtil.success(res, null, "Product deleted successfully");
     } catch (error) {
       next(error);
@@ -990,13 +1036,10 @@ export class ProductController {
     includeCostPrice: boolean = false,
   ) {
     // Convert JSON strings back to arrays
-    const effectiveFor = JsonUtil.jsonToArray(product.effectiveFor);
-    const features = JsonUtil.jsonToArray(product.features);
-    const certifications = JsonUtil.jsonToArray(product.certifications);
-    const howToUse = JsonUtil.jsonToArray(product.howToUse);
-    const cautions = JsonUtil.jsonToArray(product.cautions);
-    const ingredients = JsonUtil.jsonToArray(product.ingredients);
+    const sizes = JsonUtil.jsonToArray(product.sizes);
     const badges = JsonUtil.jsonToArray(product.badges);
+    const skinType = JsonUtil.jsonToArray(product.skinType);
+    const skinConcern = JsonUtil.jsonToArray(product.skinConcern);
 
     // Calculate stock status
     let stockStatus: "in_stock" | "low_stock" | "out_of_stock" = "in_stock";
@@ -1016,15 +1059,12 @@ export class ProductController {
 
     const response: any = {
       ...product,
-      effectiveFor,
-      features,
-      certifications,
+      sizes,
       badges,
+      skinType,
+      skinConcern,
       stockStatus,
       discountPercentage,
-      cautions,
-      howToUse,
-      ingredients,
     };
 
     // Hide costPrice from public

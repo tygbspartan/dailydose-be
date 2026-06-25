@@ -1,19 +1,27 @@
 import { Router } from "express";
 import { OrderController } from "../controllers/order.controller";
-import { authenticate, isAdmin } from "../middleware/auth.middleware";
+import {
+  authenticate,
+  optionalAuthenticate,
+  isAdmin,
+} from "../middleware/auth.middleware";
 
 const router = Router();
 
 // ==================== CUSTOMER ROUTES ====================
 
-// Checkout
-router.post("/checkout", authenticate, OrderController.checkout);
+// Checkout (guest-friendly)
+router.post("/checkout", optionalAuthenticate, OrderController.checkout);
 
-// Get user's orders
+// Get user's orders (logged-in only — guests have no history)
 router.get("/", authenticate, OrderController.getUserOrders);
 
-// Get single order by order number
-router.get("/:orderNumber", authenticate, OrderController.getOrderByNumber);
+// Get single order by order number (guest-friendly for confirmation page)
+router.get(
+  "/:orderNumber",
+  optionalAuthenticate,
+  OrderController.getOrderByNumber
+);
 
 // ==================== ADMIN ROUTES ====================
 

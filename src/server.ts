@@ -6,6 +6,7 @@ import {
 } from "./config/database.config";
 import { EmailService } from "./services/email.service";
 import { SeedService } from "./services/seed.service";
+import { getRedisClient } from "./config/redis.config";
 
 // Validate environment variables on startup
 try {
@@ -35,6 +36,9 @@ const startServer = async () => {
       );
       // Don't exit - allow server to run without email
     }
+
+    // Initialize Redis connection (optional — skipped if REDIS_URL not set)
+    getRedisClient();
 
     // Run seed (create admin user)
     await SeedService.runSeed();

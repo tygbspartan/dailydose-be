@@ -9,6 +9,7 @@ import {
 } from "../utils/customError.util";
 import { CreateBrandRequest, UpdateBrandRequest } from "../types/product.types";
 import { StorageService } from "../services/storage.service";
+import { CacheService, TTL } from "../services/cache.service";
 
 export class BrandController {
   // Create brand (Admin only)
@@ -56,12 +57,8 @@ export class BrandController {
         },
       });
 
-      return ResponseUtil.success(
-        res,
-        brand,
-        "Brand created successfully",
-        201
-      );
+      CacheService.invalidatePatternBackground("brands:*");
+      return ResponseUtil.success(res, brand, "Brand created successfully", 201);
     } catch (error) {
       next(error);
     }
@@ -71,6 +68,10 @@ export class BrandController {
   static async getAll(req: Request, res: Response, next: NextFunction) {
     try {
       const { isActive, isFeatured } = req.query;
+
+      const cacheKey = `brands:all:${JSON.stringify(req.query)}`;
+      const cached = await CacheService.get(cacheKey);
+      if (cached) return ResponseUtil.success(res, cached, "Brands retrieved successfully");
 
       // Build filter
       const where: any = {};
@@ -102,11 +103,8 @@ export class BrandController {
         _count: undefined, // Remove internal count object
       }));
 
-      return ResponseUtil.success(
-        res,
-        response,
-        "Brands retrieved successfully"
-      );
+      CacheService.setBackground(cacheKey, response, TTL.BRAND);
+      return ResponseUtil.success(res, response, "Brands retrieved successfully");
     } catch (error) {
       next(error);
     }
@@ -115,6 +113,9 @@ export class BrandController {
   // Get featured brands (Public)
   static async getFeatured(req: Request, res: Response, next: NextFunction) {
     try {
+      const cached = await CacheService.get("brands:featured");
+      if (cached) return ResponseUtil.success(res, cached, "Featured brands retrieved successfully");
+
       const brands = await prisma.brand.findMany({
         where: {
           isFeatured: true,
@@ -136,11 +137,8 @@ export class BrandController {
         _count: undefined,
       }));
 
-      return ResponseUtil.success(
-        res,
-        response,
-        "Featured brands retrieved successfully"
-      );
+      CacheService.setBackground("brands:featured", response, TTL.BRAND);
+      return ResponseUtil.success(res, response, "Featured brands retrieved successfully");
     } catch (error) {
       next(error);
     }
@@ -150,6 +148,10 @@ export class BrandController {
   static async getBySlug(req: Request, res: Response, next: NextFunction) {
     try {
       const { slug } = req.params;
+
+      const cacheKey = `brands:slug:${slug}`;
+      const cached = await CacheService.get(cacheKey);
+      if (cached) return ResponseUtil.success(res, cached, "Brand retrieved successfully");
 
       const brand = await prisma.brand.findUnique({
         where: { slug },
@@ -166,14 +168,9 @@ export class BrandController {
         throw new NotFoundError("Brand not found");
       }
 
-      return ResponseUtil.success(
-        res,
-        {
-          ...brand,
-          productCount: brand._count.products,
-        },
-        "Brand retrieved successfully"
-      );
+      const response = { ...brand, productCount: brand._count.products };
+      CacheService.setBackground(cacheKey, response, TTL.BRAND);
+      return ResponseUtil.success(res, response, "Brand retrieved successfully");
     } catch (error) {
       next(error);
     }
@@ -245,6 +242,7 @@ export class BrandController {
         data: updateData,
       });
 
+      CacheService.invalidatePatternBackground("brands:*");
       return ResponseUtil.success(res, brand, "Brand updated successfully");
     } catch (error) {
       next(error);
@@ -286,6 +284,7 @@ export class BrandController {
 
       await prisma.brand.delete({ where: { id: parseInt(id) } });
 
+      CacheService.invalidatePatternBackground("brands:*");
       return ResponseUtil.success(res, null, "Brand deleted successfully");
     } catch (error) {
       next(error);
