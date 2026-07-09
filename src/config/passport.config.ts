@@ -2,6 +2,7 @@ import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { config } from "./env.config";
 import prisma from "./database.config";
+import { EmailService } from "../services/email.service";
 
 // Configure Google OAuth Strategy
 passport.use(
@@ -54,6 +55,15 @@ passport.use(
               role: "customer",
             },
           });
+
+          // Welcome the new OAuth user (fire-and-forget — no verification step
+          // is involved for Google sign-ups, so send it here on first login)
+          void EmailService.sendWelcomeEmail(
+            user.email,
+            user.firstName || undefined
+          ).catch((err) =>
+            console.error("Failed to send welcome email:", err)
+          );
         }
 
         return done(null, user);

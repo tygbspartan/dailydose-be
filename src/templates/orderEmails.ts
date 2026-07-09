@@ -154,6 +154,106 @@ export const generateCustomerOrderEmail = (data: OrderEmailData): string => {
   `;
 };
 
+// Order status change notification (shipped / delivered / cancelled)
+export const generateOrderStatusEmail = (data: {
+  customerName: string;
+  orderNumber: string;
+  status: "shipped" | "delivered" | "cancelled";
+}): string => {
+  const statusConfig: Record<
+    "shipped" | "delivered" | "cancelled",
+    { color: string; title: string; message: string }
+  > = {
+    shipped: {
+      color: "#2563eb",
+      title: "Your Order Is On Its Way! 🚚",
+      message: `Good news, ${data.customerName}! Your order <strong>${data.orderNumber}</strong> has been shipped and is on its way to you.`,
+    },
+    delivered: {
+      color: "#16a34a",
+      title: "Your Order Has Been Delivered! 📦",
+      message: `Hi ${data.customerName}, your order <strong>${data.orderNumber}</strong> has been delivered. We hope you love it!`,
+    },
+    cancelled: {
+      color: "#dc2626",
+      title: "Your Order Has Been Cancelled",
+      message: `Hi ${data.customerName}, your order <strong>${data.orderNumber}</strong> has been cancelled. If this wasn't expected or you have any questions, please contact us.`,
+    },
+  };
+
+  const cfg = statusConfig[data.status];
+
+  const reviewLine =
+    data.status === "delivered"
+      ? `<p style="margin:20px 0 0;color:#15803d;font-size:15px;line-height:1.7;">
+           Thank you for shopping with us! We'd love to hear what you think —
+           <a href="${process.env.CLIENT_URL}" style="color:#16a34a;font-weight:600;">please leave a review</a>.
+         </p>`
+      : "";
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background-color: ${cfg.color}; color: white; padding: 24px 20px; text-align: center; border-radius: 5px 5px 0 0; }
+    .content { background-color: #f9f9f9; padding: 24px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 5px 5px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 style="margin:0;">${cfg.title}</h1>
+  </div>
+  <div class="content">
+    <p>${cfg.message}</p>
+    ${reviewLine}
+    <p style="margin-top:24px;">If you have any questions, just reply to this email — we're happy to help.</p>
+    <p>Best regards,<br><strong>The Daily Dose Team</strong></p>
+  </div>
+</body>
+</html>
+  `;
+};
+
+// Payment received confirmation
+export const generatePaymentReceivedEmail = (data: {
+  customerName: string;
+  orderNumber: string;
+  amount: number;
+  paymentMethod: string;
+}): string => {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background-color: #16a34a; color: white; padding: 24px 20px; text-align: center; border-radius: 5px 5px 0 0; }
+    .content { background-color: #f9f9f9; padding: 24px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 5px 5px; }
+    .amount-box { background-color: #f0fdf4; border:1px solid #86efac; border-radius: 8px; padding: 16px 20px; margin: 16px 0; text-align:center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 style="margin:0;">Payment Received Successfully ✅</h1>
+  </div>
+  <div class="content">
+    <p>Hi ${data.customerName},</p>
+    <p>We've successfully received your payment for order <strong>${data.orderNumber}</strong>. Thank you!</p>
+    <div class="amount-box">
+      <p style="margin:0 0 4px;font-size:13px;color:#6b7280;">Amount Paid</p>
+      <p style="margin:0;font-size:24px;font-weight:bold;color:#15803d;">Rs ${data.amount.toFixed(2)}</p>
+      <p style="margin:8px 0 0;font-size:13px;color:#6b7280;">via ${data.paymentMethod}</p>
+    </div>
+    <p>Your order is now being processed and we'll keep you updated on its progress.</p>
+    <p>Best regards,<br><strong>The Daily Dose Team</strong></p>
+  </div>
+</body>
+</html>
+  `;
+};
+
 export const generateAdminOrderNotification = (
   data: OrderEmailData & { customerEmail: string; customerPhone: string }
 ): string => {

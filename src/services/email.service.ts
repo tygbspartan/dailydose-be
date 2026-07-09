@@ -1,4 +1,6 @@
 import nodemailer from "nodemailer";
+import path from "path";
+import fs from "fs";
 import { config } from "../config/env.config";
 
 interface EmailOptions {
@@ -6,6 +8,15 @@ interface EmailOptions {
   subject: string;
   html: string;
 }
+
+// Logo embedded via CID so it renders reliably across email clients.
+const LOGO_CID = "logoPrimary";
+// Resolve the logo across dev (ts-node from src) and prod (compiled to dist).
+// tsc doesn't copy .png files, so fall back to the source tree if needed.
+const LOGO_PATH = [
+  path.join(__dirname, "../logo/logoPrimary.png"),
+  path.join(process.cwd(), "src/logo/logoPrimary.png"),
+].find((p) => fs.existsSync(p)) ?? path.join(__dirname, "../logo/logoPrimary.png");
 
 export class EmailService {
   private static transporter = nodemailer.createTransport({
@@ -18,6 +29,29 @@ export class EmailService {
     },
   });
 
+  // Shared signature appended under every email (logo, phone, location).
+  private static getSignatureHtml(): string {
+    return `
+    <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:24px auto 0;border-top:1px solid #e5e7eb;">
+      <tr>
+        <td align="center" style="padding:24px 20px 8px;font-family:Arial,sans-serif;">
+          <img src="cid:${LOGO_CID}" alt="Daily Dose" width="150" style="display:block;margin:0 auto 14px;max-width:150px;height:auto;" />
+          <p style="margin:0 0 6px;font-size:13px;color:#374151;font-weight:600;">Daily Dose — Premium Pharmaceutical Cosmetics</p>
+          <p style="margin:0 0 3px;font-size:13px;color:#6b7280;">&#128222; +977 976-8988420</p>
+          <p style="margin:0;font-size:13px;color:#6b7280;">&#128205; Kalopul, Kathmandu</p>
+        </td>
+      </tr>
+    </table>`;
+  }
+
+  // Inject the signature just before </body> when present, else append.
+  private static withSignature(html: string): string {
+    const signature = this.getSignatureHtml();
+    return html.includes("</body>")
+      ? html.replace("</body>", `${signature}</body>`)
+      : html + signature;
+  }
+
   // Add this function with your other email functions
   static async sendEmail(options: EmailOptions): Promise<void> {
     try {
@@ -26,7 +60,14 @@ export class EmailService {
         from: `"Daily Dose" <${config.emailFrom}>`,
         to: options.to,
         subject: options.subject,
-        html: options.html,
+        html: this.withSignature(options.html),
+        attachments: [
+          {
+            filename: "logoPrimary.png",
+            path: LOGO_PATH,
+            cid: LOGO_CID,
+          },
+        ],
       };
 
       await this.transporter.sendMail(mailOptions);
@@ -56,11 +97,7 @@ export class EmailService {
   ): Promise<void> {
     const verificationUrl = `${config.clientUrl}/verify-email?token=${token}`;
 
-    const mailOptions = {
-      from: `"Daily Dose" <${config.emailFrom}>`,
-      to: email,
-      subject: "Verify Your Email - Daily Dose",
-      html: `<!DOCTYPE html>
+    const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -133,10 +170,13 @@ export class EmailService {
     </tr>
   </table>
 </body>
-</html>`,
-    };
+</html>`;
 
-    await this.transporter.sendMail(mailOptions);
+    await this.sendEmail({
+      to: email,
+      subject: "Verify Your Email - Daily Dose",
+      html,
+    });
     console.log(`📧 Verification email sent to: ${email}`);
   }
 
@@ -147,11 +187,7 @@ export class EmailService {
   ): Promise<void> {
     const resetUrl = `${config.clientUrl}/reset-password?token=${token}`;
 
-    const mailOptions = {
-      from: `"Daily Dose" <${config.emailFrom}>`,
-      to: email,
-      subject: "Reset Your Password - Daily Dose",
-      html: `<!DOCTYPE html>
+    const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -222,10 +258,13 @@ export class EmailService {
     </tr>
   </table>
 </body>
-</html>`,
-    };
+</html>`;
 
-    await this.transporter.sendMail(mailOptions);
+    await this.sendEmail({
+      to: email,
+      subject: "Reset Your Password - Daily Dose",
+      html,
+    });
     console.log(`📧 Password reset email sent to: ${email}`);
   }
 
@@ -236,11 +275,7 @@ export class EmailService {
   ): Promise<void> {
     const name = firstName || "there";
 
-    const mailOptions = {
-      from: `"Daily Dose" <${config.emailFrom}>`,
-      to: email,
-      subject: "Welcome to Daily Dose!",
-      html: `<!DOCTYPE html>
+    const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -314,10 +349,66 @@ export class EmailService {
     </tr>
   </table>
 </body>
-</html>`,
-    };
+</html>`;
 
-    await this.transporter.sendMail(mailOptions);
+    await this.sendEmail({
+      to: email,
+      subject: "Welcome to Daily Dose!",
+      html,
+    });
     console.log(`📧 Welcome email sent to: ${email}`);
+  }
+
+  // Send password-changed confirmation (after a successful reset)
+  static async sendPasswordChangedEmail(
+    email: string,
+    firstName?: string
+  ): Promise<void> {
+    const name = firstName || "there";
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Password Changed</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f7f6;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f7f6;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+          <tr>
+            <td align="center" style="background:linear-gradient(135deg,#16a34a,#15803d);padding:36px 40px;">
+              <h1 style="margin:0;color:#ffffff;font-size:28px;font-weight:700;letter-spacing:-0.5px;">Daily Dose</h1>
+              <p style="margin:6px 0 0;color:#bbf7d0;font-size:13px;letter-spacing:1px;text-transform:uppercase;">Security Notification</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:40px 48px 32px;">
+              <h2 style="margin:0 0 12px;color:#111827;font-size:22px;font-weight:600;">Your password was changed</h2>
+              <p style="margin:0 0 24px;color:#6b7280;font-size:15px;line-height:1.7;">
+                Hi ${name}, this is a confirmation that the password for your Daily Dose account was successfully changed. You can now log in with your new password.
+              </p>
+              <div style="background-color:#fef2f2;border-left:4px solid #dc2626;border-radius:4px;padding:14px 18px;">
+                <p style="margin:0;font-size:13px;color:#991b1b;">
+                  If you did <strong>not</strong> make this change, please contact us immediately at
+                  <a href="mailto:${config.emailUser}" style="color:#991b1b;">${config.emailUser}</a>.
+                </p>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    await this.sendEmail({
+      to: email,
+      subject: "Your Password Was Changed - Daily Dose",
+      html,
+    });
+    console.log(`📧 Password changed email sent to: ${email}`);
   }
 }

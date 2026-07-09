@@ -22,6 +22,8 @@ import {
 import {
   generateCustomerOrderEmail,
   generateAdminOrderNotification,
+  generateOrderStatusEmail,
+  generatePaymentReceivedEmail,
 } from "../templates/orderEmails";
 import { config } from "../config/env.config";
 
@@ -780,6 +782,26 @@ export class OrderController {
         },
       });
 
+      // Notify the customer for key status changes (fire-and-forget)
+      if (
+        order &&
+        (status === "shipped" ||
+          status === "delivered" ||
+          status === "cancelled")
+      ) {
+        void EmailService.sendEmail({
+          to: order.shippingEmail,
+          subject: `Your Order ${order.orderNumber} has been ${status}`,
+          html: generateOrderStatusEmail({
+            customerName: order.shippingFullName,
+            orderNumber: order.orderNumber,
+            status,
+          }),
+        }).catch((err) =>
+          console.error("Order status email failed:", err),
+        );
+      }
+
       return ResponseUtil.success(
         res,
         order,
@@ -834,6 +856,20 @@ export class OrderController {
           items: true,
         },
       });
+
+      // Notify the customer when payment is confirmed (fire-and-forget)
+      if (paymentStatus === "paid") {
+        void EmailService.sendEmail({
+          to: order.shippingEmail,
+          subject: `Payment Received - ${order.orderNumber}`,
+          html: generatePaymentReceivedEmail({
+            customerName: order.shippingFullName,
+            orderNumber: order.orderNumber,
+            amount: parseFloat(order.total.toString()),
+            paymentMethod: order.paymentMethod || "N/A",
+          }),
+        }).catch((err) => console.error("Payment email failed:", err));
+      }
 
       return ResponseUtil.success(
         res,

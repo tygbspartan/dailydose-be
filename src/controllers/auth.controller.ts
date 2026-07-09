@@ -358,6 +358,14 @@ export class AuthController {
         },
       });
 
+      // Confirm the change by email (fire-and-forget — reset is already persisted)
+      void EmailService.sendPasswordChangedEmail(
+        user.email,
+        user.firstName || undefined
+      ).catch((err) =>
+        console.error("Failed to send password changed email:", err)
+      );
+
       return ResponseUtil.success(
         res,
         null,
