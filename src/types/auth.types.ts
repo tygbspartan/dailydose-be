@@ -35,6 +35,30 @@ export interface JwtPayload {
   userId: number;
   email: string;
   role: string;
+  /** Matched against User.tokenVersion to allow server-side revocation. */
+  tokenVersion?: number;
+}
+
+// ==================== VENDOR (ADMIN) MANAGEMENT — superadmin only ====================
+
+export interface CreateVendorRequest {
+  email: string;
+  password: string;
+  companyName: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+}
+
+export interface UpdateVendorRequest {
+  companyName?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+}
+
+export interface SetVendorStatusRequest {
+  isActive: boolean;
 }
 
 export interface UserResponse {

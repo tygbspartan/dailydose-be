@@ -31,6 +31,7 @@ export class AuthService {
         userId: payload.userId,
         email: payload.email,
         role: payload.role,
+        tokenVersion: payload.tokenVersion ?? 0,
       } as object,
       config.jwtSecret,
       options
@@ -49,6 +50,7 @@ export class AuthService {
       userId: decoded.userId,
       email: decoded.email,
       role: decoded.role,
+      tokenVersion: decoded.tokenVersion ?? 0,
     };
   }
 

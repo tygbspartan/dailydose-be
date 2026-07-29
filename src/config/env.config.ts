@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import path from 'path';
 
 dotenv.config();
 
@@ -41,6 +42,10 @@ interface EnvConfig {
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
   supabaseStorageBucket: string;
+
+  // Local storage (used in production instead of Supabase)
+  publicBaseUrl: string;
+  uploadDir: string;
 
   // Redis (optional)
   redisUrl: string | null;
@@ -94,6 +99,14 @@ export const config: EnvConfig = {
   supabaseServiceRoleKey: getEnvVariable('SUPABASE_SERVICE_ROLE_KEY'),
   supabaseStorageBucket: getEnvVariable('SUPABASE_STORAGE_BUCKET', 'images'),
 
+  // Local storage — base URL that fronts the /uploads folder in production.
+  // MUST be set in prod (e.g. https://api.dailydose.skin), else image URLs break.
+  publicBaseUrl: getEnvVariable('PUBLIC_BASE_URL', `http://localhost:${process.env.PORT || '5000'}`),
+  // Where uploaded images are written on disk. Defaults to <project-root>/uploads,
+  // but on cPanel set UPLOAD_DIR to a stable path OUTSIDE the deploy folder
+  // (e.g. /home/<cpaneluser>/dailydose-uploads) so redeploys don't wipe images.
+  uploadDir: process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads'),
+
   // Redis (optional — caching disabled if not set)
   redisUrl: process.env['REDIS_URL'] || null,
 };
@@ -116,14 +129,23 @@ export const validateEnv = (): void => {
     'SUPABASE_SERVICE_ROLE_KEY',
   ];
   
+  // Production-only variables. In dev these aren't needed (Supabase is used
+  // for storage), so we don't want to block local development on them.
+  const productionOnlyVars =
+    config.nodeEnv === 'production'
+      ? [
+          'PUBLIC_BASE_URL', // fronts the /uploads folder — image URLs break without it
+        ]
+      : [];
+
   const missing: string[] = [];
-  
-  criticalVars.forEach(varName => {
+
+  [...criticalVars, ...productionOnlyVars].forEach(varName => {
     if (!process.env[varName]) {
       missing.push(varName);
     }
   });
-  
+
   if (missing.length > 0) {
     console.error('❌ Missing required environment variables:');
     missing.forEach(varName => console.error(`   - ${varName}`));

@@ -2,16 +2,17 @@ import { Router } from 'express';
 import passport from '../config/passport.config';
 import { AuthController } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth.middleware';
+import { authLimiter } from '../middleware/rateLimit';
 
 const router = Router();
 
-// Public routes
-router.post('/register', AuthController.register);
-router.post('/login', AuthController.login);
-router.post('/verify-email', AuthController.verifyEmail);
-router.post('/resend-verification', AuthController.resendVerification);
-router.post('/forgot-password', AuthController.forgotPassword);
-router.post('/reset-password', AuthController.resetPassword);
+// Public routes — throttled to curb brute-force / enumeration.
+router.post('/register', authLimiter, AuthController.register);
+router.post('/login', authLimiter, AuthController.login);
+router.post('/verify-email', authLimiter, AuthController.verifyEmail);
+router.post('/resend-verification', authLimiter, AuthController.resendVerification);
+router.post('/forgot-password', authLimiter, AuthController.forgotPassword);
+router.post('/reset-password', authLimiter, AuthController.resetPassword);
 
 // Google OAuth routes
 router.get(

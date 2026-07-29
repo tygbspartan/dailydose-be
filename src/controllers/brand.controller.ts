@@ -10,6 +10,8 @@ import {
 import { CreateBrandRequest, UpdateBrandRequest } from "../types/product.types";
 import { StorageService } from "../services/storage.service";
 import { CacheService, TTL } from "../services/cache.service";
+import { ROLES } from "../constants/roles.constants";
+import { JwtPayload } from "../types/auth.types";
 
 export class BrandController {
   // Create brand (Admin only)
@@ -44,6 +46,11 @@ export class BrandController {
         );
       }
 
+      // Ownership: superadmin brands are platform-owned (ownerId null) and may be
+      // featured; vendor brands are owned by them and can't set the featured flag.
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const isSuperAdmin = jwtPayload.role === ROLES.SUPERADMIN;
+
       // Create brand
       const brand = await prisma.brand.create({
         data: {
@@ -53,7 +60,8 @@ export class BrandController {
           logoUrl,
           metaTitle,
           metaDescription,
-          isFeatured,
+          isFeatured: isSuperAdmin ? isFeatured ?? false : false,
+          owner: isSuperAdmin ? undefined : { connect: { id: jwtPayload.userId } },
         },
       });
 
@@ -215,6 +223,14 @@ export class BrandController {
 
       if (!existingBrand) {
         throw new NotFoundError("Brand not found");
+      }
+
+      // Vendors cannot curate the storefront (isFeatured) or reassign ownership.
+      // (Ownership itself is already enforced by the route guard.)
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      if (jwtPayload.role !== ROLES.SUPERADMIN) {
+        delete (updateData as any).isFeatured;
+        delete (updateData as any).ownerId;
       }
 
       // If updating slug, check for conflicts

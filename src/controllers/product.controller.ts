@@ -7,6 +7,7 @@ import {
   BadRequestError,
   NotFoundError,
   ConflictError,
+  ForbiddenError,
 } from "../utils/customError.util";
 import {
   CreateProductRequest,
@@ -16,6 +17,9 @@ import {
 } from "../types/product.types";
 import { StorageService } from "../services/storage.service";
 import { CacheService, TTL } from "../services/cache.service";
+import { ROLES } from "../constants/roles.constants";
+import { assertOwnership } from "../utils/ownership.util";
+import { JwtPayload } from "../types/auth.types";
 
 // Helper function to parse JSON fields
 const parseProductArrays = (product: any) => {
@@ -55,6 +59,33 @@ function validateSkinValues(
 
 export class ProductController {
   // Create product (Admin)
+  // A vendor may only use a brand they own, or an unclaimed brand — which they
+  // then claim (ownerId set to them). Superadmin bypasses. No-op if no brandId.
+  private static async assertBrandUsable(
+    brandId: number | undefined,
+    user: JwtPayload,
+  ): Promise<void> {
+    if (!brandId || user.role === ROLES.SUPERADMIN) return;
+
+    const brand = await prisma.brand.findUnique({
+      where: { id: brandId },
+      select: { id: true, ownerId: true, name: true },
+    });
+    if (!brand) throw new BadRequestError("Brand not found");
+
+    if (brand.ownerId && brand.ownerId !== user.userId) {
+      throw new ForbiddenError(
+        `The brand "${brand.name}" belongs to another vendor.`,
+      );
+    }
+    if (!brand.ownerId) {
+      await prisma.brand.update({
+        where: { id: brand.id },
+        data: { ownerId: user.userId },
+      });
+    }
+  }
+
   static async create(req: Request, res: Response, next: NextFunction) {
     try {
       const {
@@ -103,6 +134,21 @@ export class ProductController {
       if (skinType?.length) validateSkinValues(skinType, ALLOWED_SKIN_TYPES, "skinType");
       if (skinConcern?.length) validateSkinValues(skinConcern, ALLOWED_SKIN_CONCERNS, "skinConcern");
 
+      // Ownership & privileged-flag scoping.
+      // - Superadmin: product is platform-owned (ownerId = null) and may set the
+      //   store-wide featured/homepage flags.
+      // - Vendor: product is owned by them; featured/homepage are forced off
+      //   (only the superadmin curates the storefront).
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const isSuperAdmin = jwtPayload.role === ROLES.SUPERADMIN;
+      const ownerId = isSuperAdmin ? null : jwtPayload.userId;
+      const featuredFlag = isSuperAdmin ? isFeatured ?? false : false;
+      const homepageFlag = isSuperAdmin ? homepageFeature ?? false : false;
+
+      // Vendors may only attach products to a brand they own or an unclaimed one
+      // (which they then claim). Superadmin has no such restriction.
+      await ProductController.assertBrandUsable(brandId, jwtPayload);
+
       // Check if SKU already exists (if provided)
       if (sku) {
         const existingSku = await prisma.product.findUnique({
@@ -149,8 +195,9 @@ export class ProductController {
               metaTitle,
               metaDescription,
               isActive: isActive ?? true,
-              isFeatured: isFeatured ?? false,
-              homepageFeature: homepageFeature ?? false,
+              isFeatured: featuredFlag,
+              homepageFeature: homepageFlag,
+              owner: ownerId ? { connect: { id: ownerId } } : undefined,
               sizes: sizes?.length ? JSON.stringify(sizes) : null,
               skinType: skinType?.length ? JSON.stringify(skinType) : null,
               skinConcern: skinConcern?.length ? JSON.stringify(skinConcern) : null,
@@ -323,6 +370,11 @@ export class ProductController {
         throw new NotFoundError("Product not found");
       }
 
+      // A vendor may only update their own product; superadmin may update any.
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const isSuperAdmin = jwtPayload.role === ROLES.SUPERADMIN;
+      assertOwnership(existingProduct.ownerId, jwtPayload);
+
       // Extract fields from updateData
       const {
         name,
@@ -350,6 +402,11 @@ export class ProductController {
 
       if (skinType?.length) validateSkinValues(skinType, ALLOWED_SKIN_TYPES, "skinType");
       if (skinConcern?.length) validateSkinValues(skinConcern, ALLOWED_SKIN_CONCERNS, "skinConcern");
+
+      // If a vendor is moving the product to a different brand, enforce brand ownership.
+      if (brandId !== undefined && brandId !== null) {
+        await ProductController.assertBrandUsable(brandId, jwtPayload);
+      }
 
       // Check if SKU is being changed and if it's already in use
       if (sku && sku !== existingProduct.sku) {
@@ -406,8 +463,9 @@ export class ProductController {
               : undefined,
             countryOfOrigin,
             isActive,
-            isFeatured,
-            homepageFeature,
+            // Only the superadmin curates storefront featured/homepage flags.
+            isFeatured: isSuperAdmin ? isFeatured : undefined,
+            homepageFeature: isSuperAdmin ? homepageFeature : undefined,
             metaTitle,
             metaDescription,
             sizes: sizes !== undefined ? (sizes?.length ? JSON.stringify(sizes) : null) : undefined,
@@ -836,6 +894,69 @@ export class ProductController {
 
       CacheService.setBackground(cacheKey, response, TTL.PRODUCT_SLUG);
       return ResponseUtil.success(res, response, "Product retrieved successfully");
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Admin/vendor product list (scoped). Superadmin sees all products (optionally
+  // filtered by ?ownerId=<id> or ?ownerId=null for platform-owned); a vendor
+  // sees only their own. Includes costPrice and is never cached.
+  static async getAdminProducts(req: Request, res: Response, next: NextFunction) {
+    try {
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const { page = 1, limit = 20, search, ownerId } = req.query;
+
+      const pageNum = parseInt(page as string);
+      const limitNum = parseInt(limit as string);
+      const skip = (pageNum - 1) * limitNum;
+
+      const where: any = {};
+      if (jwtPayload.role === ROLES.SUPERADMIN) {
+        if (ownerId !== undefined) {
+          where.ownerId =
+            ownerId === "null" ? null : parseInt(ownerId as string);
+        }
+      } else {
+        // Vendors are always scoped to their own products.
+        where.ownerId = jwtPayload.userId;
+      }
+
+      if (search) {
+        where.OR = [
+          { name: { contains: search as string, mode: "insensitive" } },
+          { sku: { contains: search as string, mode: "insensitive" } },
+        ];
+      }
+
+      const [products, total] = await Promise.all([
+        prisma.product.findMany({
+          where,
+          include: {
+            brand: true,
+            category: true,
+            images: { where: { isPrimary: true }, take: 1 },
+          },
+          skip,
+          take: limitNum,
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.product.count({ where }),
+      ]);
+
+      return ResponseUtil.success(
+        res,
+        {
+          data: products.map(parseProductArrays),
+          pagination: {
+            page: pageNum,
+            limit: limitNum,
+            total,
+            totalPages: Math.ceil(total / limitNum),
+          },
+        },
+        "Products retrieved successfully",
+      );
     } catch (error) {
       next(error);
     }

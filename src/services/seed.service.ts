@@ -1,24 +1,34 @@
 import prisma from "../config/database.config";
 import { AuthService } from "./auth.service";
 import { config } from "../config/env.config";
+import { ROLES } from "../constants/roles.constants";
 
 export class SeedService {
-  // Create admin user if it doesn't exist
+  // Create the superadmin (platform operator) if it doesn't exist.
   static async createAdminUser(): Promise<void> {
     try {
-      console.log("🔍 Checking for admin user...");
+      console.log("🔍 Checking for superadmin user...");
 
-      // Check if admin already exists
+      // Check if the superadmin already exists
       const existingAdmin = await prisma.user.findUnique({
         where: { email: config.adminEmail },
       });
 
       if (existingAdmin) {
-        console.log("✅ Admin user already exists");
+        // Ensure the seeded account is a superadmin (upgrades a legacy "admin").
+        if (existingAdmin.role !== ROLES.SUPERADMIN) {
+          await prisma.user.update({
+            where: { id: existingAdmin.id },
+            data: { role: ROLES.SUPERADMIN },
+          });
+          console.log("✅ Seeded account upgraded to superadmin");
+        } else {
+          console.log("✅ Superadmin user already exists");
+        }
         return;
       }
 
-      // Create admin user
+      // Create superadmin user
       const passwordHash = await AuthService.hashPassword(config.adminPassword);
 
       const admin = await prisma.user.create({
@@ -27,8 +37,8 @@ export class SeedService {
           passwordHash,
           firstName: config.adminFirstName,
           lastName: config.adminLastName,
-          role: "admin",
-          isEmailVerified: true, // Admin doesn't need email verification
+          role: ROLES.SUPERADMIN,
+          isEmailVerified: true, // Superadmin doesn't need email verification
         },
       });
 

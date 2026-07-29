@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { ReviewController } from "../controllers/review.controller";
-import { authenticate, isAdmin } from "../middleware/auth.middleware";
+import { authenticate, isSuperadmin } from "../middleware/auth.middleware";
 
 const router = Router();
 
@@ -33,18 +33,19 @@ router.post("/:id/helpful", authenticate, ReviewController.markHelpful);
 router.delete("/:id/helpful", authenticate, ReviewController.removeHelpful);
 
 // ==================== ADMIN ROUTES ====================
+// Review moderation is a platform responsibility — superadmin only.
 
 // Get all reviews
-router.get("/admin/all", authenticate, isAdmin, ReviewController.getAllReviews);
+router.get("/admin/all", authenticate, isSuperadmin, ReviewController.getAllReviews);
 
 // Moderate review (approve/reject)
-router.patch("/:id/moderate", authenticate, isAdmin, ReviewController.moderate);
+router.patch("/:id/moderate", authenticate, isSuperadmin, ReviewController.moderate);
 
 // Delete review
 router.delete(
   "/admin/:id",
   authenticate,
-  isAdmin,
+  isSuperadmin,
   ReviewController.adminDelete
 );
 

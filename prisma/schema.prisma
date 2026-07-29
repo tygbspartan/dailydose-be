@@ -20,13 +20,28 @@ model User {
   lastName  String? @map("last_name")
   phone     String?
 
-  role String @default("customer")
+  // Vendor (admin) profile. A vendor is a company, so companyName is its display
+  // name and logoUrl its avatar/logo. Null for customers/superadmin.
+  companyName String? @map("company_name")
+  logoUrl     String? @map("logo_url")
+
+  role String @default("customer") // "customer" | "admin" (vendor) | "superadmin"
+
+  // Account moderation — superadmin can deactivate a vendor without deleting them.
+  isActive Boolean @default(true) @map("is_active")
+
+  // Which superadmin created this admin/vendor (null for self-registered
+  // customers and the seeded superadmin).
+  createdById Int? @map("created_by_id")
 
   isEmailVerified        Boolean @default(false) @map("is_email_verified")
   emailVerificationToken String? @unique @map("email_verification_token")
 
   passwordResetToken  String?   @unique @map("password_reset_token")
   passwordResetExpiry DateTime? @map("password_reset_expiry")
+
+  // Bumped on password change/reset and deactivation to invalidate existing JWTs.
+  tokenVersion Int @default(0) @map("token_version")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -36,6 +51,15 @@ model User {
   orders             Order[]
   reviews            Review[]
   reviewHelpfulVotes ReviewHelpful[]
+
+  // Marketplace ownership (vendor = admin)
+  ownedProducts  Product[]  @relation("ProductOwner")
+  ownedBrands    Brand[]    @relation("BrandOwner")
+  ownedDiscounts Discount[] @relation("DiscountOwner")
+
+  // Self-relation: superadmin -> vendors they created
+  createdBy     User?  @relation("AdminCreator", fields: [createdById], references: [id])
+  createdAdmins User[] @relation("AdminCreator")
 
   @@map("users")
 }
@@ -104,11 +128,18 @@ model Brand {
   metaTitle       String? @map("meta_title")
   metaDescription String? @map("meta_description")
 
+  // Exclusive vendor ownership. When set, only this vendor (and the superadmin)
+  // may create products under this brand. Null = unclaimed / platform-owned;
+  // the first vendor to use it claims it. Assigned/reassigned by the superadmin.
+  ownerId Int? @map("owner_id")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  owner    User?     @relation("BrandOwner", fields: [ownerId], references: [id])
   products Product[]
 
+  @@index([ownerId])
   @@map("brands")
 }
 
@@ -119,6 +150,10 @@ model Product {
   name String // e.g., "Pax Moly KOREA Real Snail Facial Sheet Mask"
   slug String  @unique // e.g., "pax-moly-korea-real-snail-facial-sheet-mask"
   sku  String? @unique
+
+  // Ownership — the vendor (admin) who owns this product.
+  // Null = platform-owned (managed by the superadmin).
+  ownerId Int? @map("owner_id")
 
   // Categorization
   brandId    Int? @map("brand_id")
@@ -162,6 +197,7 @@ model Product {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
+  owner          User?                  @relation("ProductOwner", fields: [ownerId], references: [id])
   brand          Brand?                 @relation(fields: [brandId], references: [id])
   category       Category?              @relation(fields: [categoryId], references: [id])
   images         ProductImage[]
@@ -172,6 +208,7 @@ model Product {
   orderItems     OrderItem[]
   reviews        Review[]
 
+  @@index([ownerId])
   @@map("products")
 }
 
@@ -224,12 +261,18 @@ model Discount {
   usageLimit        Int?     @map("usage_limit")
   usedCount         Int      @default(0) @map("used_count")
 
+  // Ownership — the vendor (admin) who created this discount.
+  // Null = platform-wide (managed by the superadmin).
+  ownerId Int? @map("owner_id")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  owner    User?             @relation("DiscountOwner", fields: [ownerId], references: [id])
   products ProductDiscount[]
   orders   Order[]
 
+  @@index([ownerId])
   @@map("discounts")
 }
 

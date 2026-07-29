@@ -1,5 +1,24 @@
 import { createClient } from "@supabase/supabase-js";
+import fs from "fs/promises";
+import path from "path";
 import { config } from "../config/env.config";
+
+export type UploadFolder = "products" | "brands" | "categories" | "hero";
+
+/**
+ * Common storage interface. Two implementations exist:
+ *  - Supabase Storage (used in development)
+ *  - Local disk under /uploads (used in production)
+ * The active one is chosen by NODE_ENV, so all call sites stay identical.
+ */
+export interface IStorageService {
+  uploadImage(file: Express.Multer.File, folder?: UploadFolder): Promise<string>;
+  deleteImage(publicUrl: string): Promise<void>;
+  deleteImages(publicUrls: string[]): Promise<void>;
+  extractPath(publicUrl: string): string | null;
+}
+
+// ==================== Supabase (development) ====================
 
 const supabase = createClient(
   config.supabaseUrl,
@@ -8,14 +27,14 @@ const supabase = createClient(
 
 const BUCKET = config.supabaseStorageBucket;
 
-export const StorageService = {
+export const SupabaseStorageService: IStorageService = {
   /**
    * Upload a single image file to Supabase Storage.
    * Returns the public URL of the uploaded file.
    */
   async uploadImage(
     file: Express.Multer.File,
-    folder: "products" | "brands" | "categories" | "hero" = "products",
+    folder: UploadFolder = "products",
   ): Promise<string> {
     const ext = file.originalname.split(".").pop()?.toLowerCase() || "jpg";
     const filename = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
@@ -40,7 +59,7 @@ export const StorageService = {
    * Silently ignores if the path cannot be parsed (e.g. external URLs).
    */
   async deleteImage(publicUrl: string): Promise<void> {
-    const storagePath = StorageService.extractPath(publicUrl);
+    const storagePath = SupabaseStorageService.extractPath(publicUrl);
     if (!storagePath) return;
 
     await supabase.storage.from(BUCKET).remove([storagePath]);
@@ -52,7 +71,7 @@ export const StorageService = {
    */
   async deleteImages(publicUrls: string[]): Promise<void> {
     const paths = publicUrls
-      .map(StorageService.extractPath)
+      .map(SupabaseStorageService.extractPath)
       .filter((p): p is string => p !== null);
 
     if (paths.length === 0) return;
@@ -77,3 +96,69 @@ export const StorageService = {
     }
   },
 };
+
+// ==================== Local disk (production) ====================
+
+// Where images are written on disk (configurable via UPLOAD_DIR; defaults to
+// <project-root>/uploads). Kept outside dist/ so it survives rebuilds.
+const UPLOAD_DIR = config.uploadDir;
+
+export const LocalStorageService: IStorageService = {
+  /**
+   * Write the uploaded file to <uploads>/<folder>/<filename> and return
+   * a public URL served by express.static (see app.ts).
+   */
+  async uploadImage(
+    file: Express.Multer.File,
+    folder: UploadFolder = "products",
+  ): Promise<string> {
+    const ext = file.originalname.split(".").pop()?.toLowerCase() || "jpg";
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const folderPath = path.join(UPLOAD_DIR, folder);
+
+    await fs.mkdir(folderPath, { recursive: true });
+    await fs.writeFile(path.join(folderPath, filename), file.buffer);
+
+    return `${config.publicBaseUrl}/uploads/${folder}/${filename}`;
+  },
+
+  /**
+   * Delete a single local image by its public URL.
+   * Silently ignores missing files or unparseable/external URLs.
+   */
+  async deleteImage(publicUrl: string): Promise<void> {
+    const storagePath = LocalStorageService.extractPath(publicUrl);
+    if (!storagePath) return;
+
+    try {
+      await fs.unlink(path.join(UPLOAD_DIR, storagePath));
+    } catch {
+      // File already gone — ignore.
+    }
+  },
+
+  async deleteImages(publicUrls: string[]): Promise<void> {
+    await Promise.all(
+      publicUrls.map((url) => LocalStorageService.deleteImage(url)),
+    );
+  },
+
+  /**
+   * Extract the on-disk path (relative to UPLOAD_DIR) from a public URL.
+   * e.g. "https://api.dailydose.skin/uploads/products/abc.jpg" → "products/abc.jpg"
+   */
+  extractPath(publicUrl: string): string | null {
+    const marker = "/uploads/";
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return null;
+    return publicUrl.slice(idx + marker.length);
+  },
+};
+
+// ==================== Active implementation ====================
+
+// Production → local disk; anything else (development) → Supabase.
+export const StorageService: IStorageService =
+  config.nodeEnv === "production"
+    ? LocalStorageService
+    : SupabaseStorageService;

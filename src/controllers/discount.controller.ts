@@ -12,6 +12,7 @@ import {
   ApplyDiscountRequest,
 } from "../types/discount.types";
 import { JwtPayload } from "../types/auth.types";
+import { ROLES } from "../constants/roles.constants";
 
 export class DiscountController {
   // ==================== ADMIN ENDPOINTS ====================
@@ -87,6 +88,12 @@ export class DiscountController {
         }
       }
 
+      // Ownership: superadmin discounts are platform-wide (ownerId null);
+      // a vendor's discount is owned by them.
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const ownerId =
+        jwtPayload.role === ROLES.SUPERADMIN ? null : jwtPayload.userId;
+
       // Create discount
       const discount = await prisma.discount.create({
         data: {
@@ -99,6 +106,7 @@ export class DiscountController {
           startDate: start,
           endDate: end,
           usageLimit,
+          owner: ownerId ? { connect: { id: ownerId } } : undefined,
         },
       });
 
@@ -147,10 +155,22 @@ export class DiscountController {
   // Get all discounts (Admin)
   static async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const { isActive, type, search } = req.query;
+      const { isActive, type, search, ownerId } = req.query;
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
 
       // Build filter
       const where: any = {};
+
+      // Vendors see only their own discounts; superadmin sees all (optionally
+      // filtered by ?ownerId=<id> or ?ownerId=null for platform-wide).
+      if (jwtPayload.role === ROLES.SUPERADMIN) {
+        if (ownerId !== undefined) {
+          where.ownerId =
+            ownerId === "null" ? null : parseInt(ownerId as string);
+        }
+      } else {
+        where.ownerId = jwtPayload.userId;
+      }
 
       if (isActive !== undefined) {
         where.isActive = isActive === "true";

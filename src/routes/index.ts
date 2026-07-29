@@ -11,6 +11,7 @@ import discountRoutes from "./discount.routes";
 import reviewRoutes from "./review.routes";
 import dashboardRoutes from "./dashboard.routes";
 import heroRoutes from "./hero.routes";
+import adminRoutes from "./admin.routes";
 
 const router = Router();
 
@@ -36,5 +37,6 @@ router.use("/discounts", discountRoutes);
 router.use("/reviews", reviewRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/hero", heroRoutes);
+router.use("/admin", adminRoutes);
 
 export default router;

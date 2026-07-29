@@ -138,11 +138,17 @@ export class AuthController {
         throw new UnauthorizedError("Invalid email or password");
       }
 
+      // Reject deactivated accounts.
+      if (!user.isActive) {
+        throw new UnauthorizedError("Your account has been deactivated.");
+      }
+
       // Generate JWT token
       const token = AuthService.generateToken({
         userId: user.id,
         email: user.email,
         role: user.role,
+        tokenVersion: user.tokenVersion,
       });
 
       return ResponseUtil.success(
@@ -348,13 +354,15 @@ export class AuthController {
       // Hash new password
       const passwordHash = await AuthService.hashPassword(newPassword);
 
-      // Update password and clear reset token
+      // Update password, clear reset token, and bump tokenVersion so any
+      // existing JWTs (e.g. on a stolen session) are immediately revoked.
       await prisma.user.update({
         where: { id: user.id },
         data: {
           passwordHash,
           passwordResetToken: null,
           passwordResetExpiry: null,
+          tokenVersion: { increment: 1 },
         },
       });
 
@@ -426,6 +434,7 @@ export class AuthController {
         userId: user.id,
         email: user.email,
         role: user.role,
+        tokenVersion: user.tokenVersion,
       });
 
       // Redirect to frontend with token

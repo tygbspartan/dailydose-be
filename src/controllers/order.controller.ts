@@ -15,6 +15,7 @@ import {
   calculateShippingCost,
 } from "../types/order.types";
 import { JwtPayload } from "../types/auth.types";
+import { ROLES } from "../constants/roles.constants";
 import {
   PAYMENT_METHODS,
   requiresTransactionNumber,
@@ -571,8 +572,17 @@ export class OrderController {
       const limitNum = parseInt(limit as string);
       const skip = (pageNum - 1) * limitNum;
 
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const isSuper = jwtPayload.role === ROLES.SUPERADMIN;
+      const ownerId = jwtPayload.userId;
+
       // Build filter
       const where: any = {};
+
+      // Vendors only see orders that contain at least one of their products.
+      if (!isSuper) {
+        where.items = { some: { product: { ownerId } } };
+      }
 
       if (status) {
         where.status = status;
@@ -600,12 +610,14 @@ export class OrderController {
         ];
       }
 
-      // Get orders with pagination
+      // Get orders with pagination. For vendors, only their own line items are
+      // included (they must not see other vendors' items on a shared order).
       const [orders, total] = await Promise.all([
         prisma.order.findMany({
           where,
           include: {
             items: {
+              where: isSuper ? undefined : { product: { ownerId } },
               include: {
                 product: {
                   include: { brand: true },
@@ -652,10 +664,15 @@ export class OrderController {
       const { id } = req.params;
       const orderId = parseInt(id);
 
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const isSuper = jwtPayload.role === ROLES.SUPERADMIN;
+      const ownerId = jwtPayload.userId;
+
       const order = await prisma.order.findUnique({
         where: { id: orderId },
         include: {
-          items: true,
+          // Vendors only see their own line items on the order.
+          items: isSuper ? true : { where: { product: { ownerId } } },
           user: {
             select: {
               id: true,
@@ -669,6 +686,11 @@ export class OrderController {
       });
 
       if (!order) {
+        throw new NotFoundError("Order not found");
+      }
+
+      // A vendor may only view an order that contains at least one of their items.
+      if (!isSuper && order.items.length === 0) {
         throw new NotFoundError("Order not found");
       }
 

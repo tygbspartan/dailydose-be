@@ -4,14 +4,21 @@ import {
   authenticate,
   optionalAuthenticate,
   isAdmin,
+  isSuperadmin,
 } from "../middleware/auth.middleware";
+import { checkoutLimiter } from "../middleware/rateLimit";
 
 const router = Router();
 
 // ==================== CUSTOMER ROUTES ====================
 
-// Checkout (guest-friendly)
-router.post("/checkout", optionalAuthenticate, OrderController.checkout);
+// Checkout (guest-friendly, rate-limited against order spam)
+router.post(
+  "/checkout",
+  checkoutLimiter,
+  optionalAuthenticate,
+  OrderController.checkout
+);
 
 // Get user's orders (logged-in only — guests have no history)
 router.get("/", authenticate, OrderController.getUserOrders);
@@ -31,19 +38,19 @@ router.get("/admin/all", authenticate, isAdmin, OrderController.getAllOrders);
 // Get single order by ID
 router.get("/admin/:id", authenticate, isAdmin, OrderController.getOrderById);
 
-// Update order status
+// Update order status — superadmin only (orders are multi-vendor; one shared status)
 router.patch(
   "/admin/:id/status",
   authenticate,
-  isAdmin,
+  isSuperadmin,
   OrderController.updateOrderStatus
 );
 
-// Update payment status
+// Update payment status — superadmin only
 router.patch(
   "/admin/:id/payment",
   authenticate,
-  isAdmin,
+  isSuperadmin,
   OrderController.updatePaymentStatus
 );
 
