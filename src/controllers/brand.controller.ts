@@ -118,6 +118,53 @@ export class BrandController {
     }
   }
 
+  // Admin/vendor brand list (scoped). Superadmin sees all brands (optionally
+  // ?ownerId=<id> / ?ownerId=null); a vendor sees only the brands they own.
+  // Used by the admin brand-management list and the product-form brand dropdown.
+  static async getAdminBrands(req: Request, res: Response, next: NextFunction) {
+    try {
+      const jwtPayload = (req as any).jwtPayload as JwtPayload;
+      const { search, ownerId } = req.query;
+
+      const where: any = {};
+      if (jwtPayload.role === ROLES.SUPERADMIN) {
+        if (ownerId !== undefined) {
+          where.ownerId =
+            ownerId === "null" ? null : parseInt(ownerId as string);
+        }
+      } else {
+        where.ownerId = jwtPayload.userId;
+      }
+
+      if (search) {
+        where.name = { contains: search as string, mode: "insensitive" };
+      }
+
+      const brands = await prisma.brand.findMany({
+        where,
+        include: {
+          _count: { select: { products: true } },
+          owner: { select: { id: true, companyName: true, firstName: true } },
+        },
+        orderBy: { name: "asc" },
+      });
+
+      const response = brands.map((brand) => ({
+        ...brand,
+        productCount: brand._count.products,
+        _count: undefined,
+      }));
+
+      return ResponseUtil.success(
+        res,
+        response,
+        "Brands retrieved successfully",
+      );
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // Get featured brands (Public)
   static async getFeatured(req: Request, res: Response, next: NextFunction) {
     try {

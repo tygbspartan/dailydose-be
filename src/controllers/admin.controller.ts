@@ -45,6 +45,7 @@ export class AdminController {
         firstName,
         lastName,
         phone,
+        brandIds,
       }: CreateVendorRequest = req.body;
 
       if (!email || !password || !companyName) {
@@ -91,6 +92,44 @@ export class AdminController {
         },
         select: VENDOR_SELECT,
       });
+
+      // Assign the chosen brands to this vendor (only these become usable by them).
+      if (Array.isArray(brandIds) && brandIds.length > 0) {
+        const ids = [
+          ...new Set(
+            brandIds
+              .map((v) => parseInt(String(v), 10))
+              .filter((n) => Number.isInteger(n) && n > 0),
+          ),
+        ];
+        if (ids.length > 0) {
+          const found = await prisma.brand.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, ownerId: true },
+          });
+          if (found.length !== ids.length) {
+            throw new BadRequestError("One or more brand ids do not exist");
+          }
+          await prisma.$transaction(async (tx) => {
+            // If any assigned brand was owned by another vendor, deactivate and
+            // orphan that vendor's products under it before reassigning.
+            for (const b of found) {
+              if (b.ownerId && b.ownerId !== vendor.id) {
+                await tx.product.updateMany({
+                  where: { brandId: b.id, ownerId: b.ownerId },
+                  data: { isActive: false, ownerId: null },
+                });
+              }
+            }
+            await tx.brand.updateMany({
+              where: { id: { in: ids } },
+              data: { ownerId: vendor.id },
+            });
+          });
+          CacheService.invalidatePatternBackground("brands:*");
+          CacheService.invalidatePatternBackground("products:*");
+        }
+      }
 
       return ResponseUtil.success(
         res,
@@ -294,22 +333,55 @@ export class AdminController {
       }
 
       await prisma.$transaction(async (tx) => {
-        // Release brands this vendor owns that are no longer selected.
-        await tx.brand.updateMany({
-          where:
-            ids.length > 0
-              ? { ownerId: vendorId, id: { notIn: ids } }
-              : { ownerId: vendorId },
-          data: { ownerId: null },
+        // Brands this vendor currently owns.
+        const owned = await tx.brand.findMany({
+          where: { ownerId: vendorId },
+          select: { id: true },
         });
-        // Claim the selected brands for this vendor (reassigns from others).
-        if (ids.length > 0) {
+        const ownedIds = owned.map((b) => b.id);
+        const target = new Set(ids);
+
+        const toRelease = ownedIds.filter((id) => !target.has(id)); // vendor loses these
+        const toClaim = ids.filter((id) => !ownedIds.includes(id)); // vendor gains these
+
+        // When claiming a brand from ANOTHER vendor, that vendor's products
+        // under it are deactivated and orphaned to the platform (ownerId=null)
+        // so the previous owner can no longer sell or edit them.
+        if (toClaim.length > 0) {
+          const claimed = await tx.brand.findMany({
+            where: { id: { in: toClaim }, ownerId: { not: null } },
+            select: { id: true, ownerId: true },
+          });
+          for (const b of claimed) {
+            if (b.ownerId && b.ownerId !== vendorId) {
+              await tx.product.updateMany({
+                where: { brandId: b.id, ownerId: b.ownerId },
+                data: { isActive: false, ownerId: null },
+              });
+            }
+          }
           await tx.brand.updateMany({
-            where: { id: { in: ids } },
+            where: { id: { in: toClaim } },
             data: { ownerId: vendorId },
           });
         }
+
+        // Releasing a brand: this vendor's products under it are likewise
+        // deactivated and orphaned (they no longer own the brand).
+        if (toRelease.length > 0) {
+          await tx.product.updateMany({
+            where: { brandId: { in: toRelease }, ownerId: vendorId },
+            data: { isActive: false, ownerId: null },
+          });
+          await tx.brand.updateMany({
+            where: { id: { in: toRelease } },
+            data: { ownerId: null },
+          });
+        }
       });
+
+      // Deactivated products were cached; refresh the storefront lists.
+      CacheService.invalidatePatternBackground("products:*");
 
       CacheService.invalidatePatternBackground("brands:*");
 

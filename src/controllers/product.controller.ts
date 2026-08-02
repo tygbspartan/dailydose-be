@@ -59,8 +59,9 @@ function validateSkinValues(
 
 export class ProductController {
   // Create product (Admin)
-  // A vendor may only use a brand they own, or an unclaimed brand — which they
-  // then claim (ownerId set to them). Superadmin bypasses. No-op if no brandId.
+  // A vendor may only create products under a brand assigned to them (a brand
+  // they own). Unassigned/platform brands and other vendors' brands are off
+  // limits — no auto-claiming. Superadmin bypasses. No-op if no brandId.
   private static async assertBrandUsable(
     brandId: number | undefined,
     user: JwtPayload,
@@ -73,16 +74,10 @@ export class ProductController {
     });
     if (!brand) throw new BadRequestError("Brand not found");
 
-    if (brand.ownerId && brand.ownerId !== user.userId) {
+    if (brand.ownerId !== user.userId) {
       throw new ForbiddenError(
-        `The brand "${brand.name}" belongs to another vendor.`,
+        "You can only add products under a brand assigned to you.",
       );
-    }
-    if (!brand.ownerId) {
-      await prisma.brand.update({
-        where: { id: brand.id },
-        data: { ownerId: user.userId },
-      });
     }
   }
 
@@ -278,8 +273,9 @@ export class ProductController {
               category: categoryId ? { connect: { id: categoryId } } : undefined,
               countryOfOrigin,
               isActive: isActive ?? true,
-              isFeatured: isFeatured ?? false,
-              homepageFeature: homepageFeature ?? false,
+              isFeatured: featuredFlag,
+              homepageFeature: homepageFlag,
+              owner: ownerId ? { connect: { id: ownerId } } : undefined,
               metaDescription,
               metaTitle,
               sizes: sizes?.length ? JSON.stringify(sizes) : null,
@@ -631,9 +627,11 @@ export class ProductController {
       const limitNum = parseInt(limit as string);
       const skip = (pageNum - 1) * limitNum;
 
-      // Build where clause
+      // Build where clause. The storefront only shows active products
+      // (inactive ones are hidden — e.g. a deactivated vendor or a product
+      // under a brand that was transferred away).
       const where: any = {
-        // isActive: true,
+        isActive: true,
       };
 
       if (search) {
@@ -905,7 +903,14 @@ export class ProductController {
   static async getAdminProducts(req: Request, res: Response, next: NextFunction) {
     try {
       const jwtPayload = (req as any).jwtPayload as JwtPayload;
-      const { page = 1, limit = 20, search, ownerId } = req.query;
+      const {
+        page = 1,
+        limit = 20,
+        search,
+        ownerId,
+        isFeatured,
+        homepageFeature,
+      } = req.query;
 
       const pageNum = parseInt(page as string);
       const limitNum = parseInt(limit as string);
@@ -928,6 +933,9 @@ export class ProductController {
           { sku: { contains: search as string, mode: "insensitive" } },
         ];
       }
+
+      if (isFeatured === "true") where.isFeatured = true;
+      if (homepageFeature === "true") where.homepageFeature = true;
 
       const [products, total] = await Promise.all([
         prisma.product.findMany({

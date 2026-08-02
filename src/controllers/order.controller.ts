@@ -563,6 +563,24 @@ export class OrderController {
 
   // ==================== ADMIN ENDPOINTS ====================
 
+  // For vendor views: replace order-level money with the vendor's own share
+  // (sum of their line-item subtotals). Platform-level shipping/tax/discount
+  // aren't the vendor's, so they're zeroed to avoid a misleading figure.
+  private static applyVendorTotals(order: any): any {
+    const vendorSubtotal = (order.items || []).reduce(
+      (sum: number, item: any) => sum + Number(item.subtotal),
+      0,
+    );
+    return {
+      ...order,
+      subtotal: vendorSubtotal,
+      shippingCost: 0,
+      tax: 0,
+      discount: 0,
+      total: vendorSubtotal,
+    };
+  }
+
   // Get all orders (Admin)
   static async getAllOrders(req: Request, res: Response, next: NextFunction) {
     try {
@@ -640,10 +658,16 @@ export class OrderController {
         prisma.order.count({ where }),
       ]);
 
+      // For vendors, report each order's money as their own share (their items),
+      // not the whole multi-vendor order total.
+      const data = isSuper
+        ? orders
+        : orders.map((o) => OrderController.applyVendorTotals(o));
+
       return ResponseUtil.success(
         res,
         {
-          data: orders,
+          data,
           pagination: {
             page: pageNum,
             limit: limitNum,
@@ -694,7 +718,12 @@ export class OrderController {
         throw new NotFoundError("Order not found");
       }
 
-      return ResponseUtil.success(res, order, "Order retrieved successfully");
+      // Vendors see their own share of the order money, not the full total.
+      const result = isSuper
+        ? order
+        : OrderController.applyVendorTotals(order);
+
+      return ResponseUtil.success(res, result, "Order retrieved successfully");
     } catch (error) {
       next(error);
     }
