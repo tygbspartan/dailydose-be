@@ -9,6 +9,20 @@ export interface CreateCategoryRequest {
   displayOrder?: number;
 }
 
+// Bulk creation of a whole subtree in one request. Levels are derived: if
+// `parentId` is null the top `nodes` are level 1; otherwise they are
+// parent.level + 1. Nesting beyond level 3 is rejected.
+export interface CategoryTreeNode {
+  name: string;
+  description?: string;
+  children?: CategoryTreeNode[];
+}
+
+export interface CreateCategoryTreeRequest {
+  parentId?: number | null; // attach the nodes under this existing category
+  nodes: CategoryTreeNode[];
+}
+
 export interface UpdateCategoryRequest {
   name?: string;
   slug?: string;

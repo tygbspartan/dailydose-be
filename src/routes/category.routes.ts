@@ -11,6 +11,7 @@ router.get("/slug/:slug", CategoryController.getBySlug);
 
 // Admin routes — categories are the global taxonomy, superadmin only.
 router.post("/", authenticate, isSuperadmin, CategoryController.create);
+router.post("/tree", authenticate, isSuperadmin, CategoryController.createTree);
 router.get("/:id", authenticate, isSuperadmin, CategoryController.getById);
 router.put("/:id", authenticate, isSuperadmin, CategoryController.update);
 router.delete("/:id", authenticate, isSuperadmin, CategoryController.delete);
