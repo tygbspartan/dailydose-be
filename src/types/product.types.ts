@@ -30,6 +30,7 @@ export interface UpdateCategoryRequest {
   parentId?: number;
   displayOrder?: number;
   isActive?: boolean;
+  seoDescription?: string;
 }
 
 export interface CategoryResponse {
@@ -69,6 +70,7 @@ export interface UpdateBrandRequest {
   isFeatured?: boolean;
   metaTitle?: string;
   metaDescription?: string;
+  seoDescription?: string;
 }
 
 export interface BrandResponse {

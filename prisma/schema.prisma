@@ -88,6 +88,9 @@ model Category {
   slug        String  @unique // e.g., "personal-care", "skin-care", "face-masks"
   description String?
 
+  // SEO: long-form intro copy shown above the product grid on the category page.
+  seoDescription String? @map("seo_description") @db.Text
+
   // THIS IS HOW 3-LEVEL WORKS:
   parentId Int? @map("parent_id") // NULL for Level 1, points to parent for Level 2 & 3
   level    Int  @default(1) // 1 = Main (Personal Care), 2 = Sub (Skin Care), 3 = Group (Face Masks)
@@ -127,6 +130,8 @@ model Brand {
   // SEO
   metaTitle       String? @map("meta_title")
   metaDescription String? @map("meta_description")
+  // Long-form intro copy shown above the product grid on the brand page.
+  seoDescription  String? @map("seo_description") @db.Text
 
   // Exclusive vendor ownership. When set, only this vendor (and the superadmin)
   // may create products under this brand. Null = unclaimed / platform-owned;
